@@ -35,6 +35,7 @@ export class EntityHandler {
         'JadeCityHard'
     ]);
     private static readonly MOUNT_SYNC_RETRY_DELAYS_MS = [0, 300, 1200, 2500, 4000];
+    private static readonly CLIENT_SPAWN_JOINER_SEED_DELAYS_MS = [2500, 4500];
 
     private static normalizeIdentityName(value: unknown): string {
         return String(value ?? '')
@@ -718,6 +719,20 @@ export class EntityHandler {
         }
     }
 
+    private static scheduleExistingVisibleClientSpawnEntitiesToJoiner(joiner: Client): void {
+        const levelScope = getClientLevelScope(joiner);
+        const token = joiner.token;
+        for (const delayMs of EntityHandler.CLIENT_SPAWN_JOINER_SEED_DELAYS_MS) {
+            setTimeout(() => {
+                if (!joiner.playerSpawned || getClientLevelScope(joiner) !== levelScope || joiner.token !== token) {
+                    return;
+                }
+
+                EntityHandler.sendExistingVisibleClientSpawnEntitiesToJoiner(joiner);
+            }, delayMs);
+        }
+    }
+
     private static sendOtherPlayerMountToJoiner(joiner: Client, other: Client): void {
         if (!other.character || other.clientEntID <= 0) {
             return;
@@ -1113,7 +1128,7 @@ export class EntityHandler {
             EntityHandler.sendOtherPlayerMountToJoiner(joiner, other);
         }
 
-        EntityHandler.sendExistingVisibleClientSpawnEntitiesToJoiner(joiner);
+        EntityHandler.scheduleExistingVisibleClientSpawnEntitiesToJoiner(joiner);
     }
 
     private static sendExistingVisibleClientSpawnEntitiesToJoiner(joiner: Client): void {
@@ -1128,6 +1143,9 @@ export class EntityHandler {
 
         for (const [entityId, entityProps] of levelMap.entries()) {
             if (entityId <= 0 || entityProps?.isPlayer || !entityProps?.clientSpawned) {
+                continue;
+            }
+            if (joiner.knownEntityIds.has(entityId)) {
                 continue;
             }
             if (!EntityHandler.canClientSeeEntity(joiner, entityProps)) {
