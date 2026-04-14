@@ -120,8 +120,10 @@ async function testPotionQueueAndActivationRefreshState(): Promise<void> {
 
     const activePotionPacket = client.sentPackets.find((packet) => packet.id === 0x10D);
     const playerDataRefreshPacket = client.sentPackets.find((packet) => packet.id === 0x10);
+    const combatRefreshPacket = client.sentPackets.find((packet) => packet.id === 0xFB);
     assert.ok(activePotionPacket, 'activating potion should broadcast the active consumable packet');
-    assert.ok(playerDataRefreshPacket, 'activating potion should refresh player data so potion state survives live updates');
+    assert.ok(combatRefreshPacket, 'activating potion should request a combat stat refresh so potion bonuses update immediately');
+    assert.equal(playerDataRefreshPacket, undefined, 'activating potion should not resend the full player data packet');
     assert.deepEqual(parsePotionState(activePotionPacket!.payload), {
         entityId: 4001,
         consumableId: 6

@@ -38,7 +38,6 @@ export class CommandHandler {
 
         client.character.queuedConsumableID = queuedConsumableId;
         await CommandHandler.saveCharacter(client);
-        CharacterSync.sendPlayerDataRefresh(client);
     }
 
     static async handleActivatePotion(client: Client, data: Buffer): Promise<void> {
@@ -64,8 +63,8 @@ export class CommandHandler {
 
         CharacterSync.updateLiveActiveConsumable(client, activeConsumableId);
         CharacterSync.sendActiveConsumableUpdate(client, entityId || client.clientEntID, activeConsumableId);
+        CharacterSync.requestCombatStatsRefresh(client);
         await CommandHandler.saveCharacter(client);
-        CharacterSync.sendPlayerDataRefresh(client);
     }
 
     static handleHpIncreaseNotice(client: Client, data: Buffer): void {

@@ -196,7 +196,7 @@ async function testOpenTreasureTroveConsumesCountsAndGrantsReward(): Promise<voi
     assert.ok(revealPacket, 'opening a treasure trove should send the reward reveal packet');
     assert.ok(sigilPacket, 'opening a treasure trove should award Royal Sigils');
     assert.ok(goldRewardPacket, 'gold rewards should emit the gold reward packet');
-    assert.ok(playerDataRefreshPacket, 'opening a treasure trove should refresh player data so the sigil total updates immediately');
+    assert.equal(playerDataRefreshPacket, undefined, 'opening a treasure trove should not resend the full player data packet');
     assert.deepEqual(parseLockboxReveal(revealPacket!.payload), {
         packId: 1,
         rewardIndex: 17,
