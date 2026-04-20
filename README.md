@@ -9,6 +9,7 @@ _This is required to play singleplayer._
 2. [Git](https://git-scm.com/install/)
 3. [Flash Projector](https://github.com/Grubsic/Adobe-Flash-Player-Debug-Downloads-Archive/raw/main/Windows/flashplayer_32_sa.exe)
 4. [GitHub Desktop](https://desktop.github.com/download/)[^1]
+5. Terminal
 
 ### 2. Clone Repository
 ```sh
