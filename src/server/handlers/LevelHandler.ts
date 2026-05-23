@@ -2718,13 +2718,18 @@ export class LevelHandler {
         const insideTriggerBand =
             currentY >= LevelHandler.BACK_ALLEY_DEALS_BOSS_TRIGGER_MIN_Y &&
             currentY <= LevelHandler.BACK_ALLEY_DEALS_BOSS_TRIGGER_MAX_Y;
+        const alreadyPastTrigger = currentX >= LevelHandler.BACK_ALLEY_DEALS_BOSS_TRIGGER_X;
 
-        if (!crossedTrigger || !insideTriggerBand) {
+        if (!(crossedTrigger || alreadyPastTrigger) || !insideTriggerBand) {
             return;
         }
 
         for (const other of LevelHandler.forLevelRecipients(client, true)) {
             if (!other.triggeredLevelStates.has(triggerKey)) {
+                other.currentRoomId = roomId;
+                if (!LevelHandler.hasRoomEventStarted(other, roomId)) {
+                    LevelHandler.sendRoomEventStart(other, roomId, true);
+                }
                 other.triggeredLevelStates.add(triggerKey);
                 LevelHandler.sendRoomTriggerState(other, roomId, 'am_Trigger_Boss');
             }
@@ -4141,13 +4146,30 @@ export class LevelHandler {
             !isSelf &&
             !ent.isPlayer &&
             Number(ent.team ?? 0) === EntityTeam.ENEMY;
+        if (isEnemyEntity && entState === EntityState.DEAD) {
+            const { CombatHandler } = require('./CombatHandler') as typeof import('./CombatHandler');
+            const contributionSnapshot = CombatHandler.getContributionSnapshot(getClientLevelScope(client), entityId);
+            if (contributionSnapshot.contributors.length) {
+                ent.clientDefeatVerified = true;
+                if (levelEntity && levelEntity !== ent) {
+                    levelEntity.clientDefeatVerified = true;
+                }
+            }
+        }
+        const shouldIgnoreUnverifiedDungeonBossDeadState =
+            isEnemyEntity &&
+            entState === EntityState.DEAD &&
+            MissionHandler.shouldIgnoreUnverifiedDungeonBossDefeat(currentLevel, levelEntity ?? ent);
+        const canonicalEntState = shouldIgnoreUnverifiedDungeonBossDeadState
+            ? EntityState.ACTIVE
+            : entState;
 
         const previousX = Number(ent.x ?? 0);
         ent.x += deltaX;
         ent.y += deltaY;
         ent.v = Number(ent.v ?? 0) + deltaVX;
-        ent.entState = entState;
-        ent.dead = entState === EntityState.DEAD ? true : Boolean(ent.dead);
+        ent.entState = canonicalEntState;
+        ent.dead = canonicalEntState === EntityState.DEAD ? true : Boolean(ent.dead);
         ent.facingLeft = flags.bLeft;
         ent.bRunning = flags.bRunning;
         ent.bJumping = flags.bJumping;
@@ -4160,8 +4182,8 @@ export class LevelHandler {
             levelEntity.x = ent.x;
             levelEntity.y = ent.y;
             levelEntity.v = ent.v;
-            levelEntity.entState = entState;
-            levelEntity.dead = entState === EntityState.DEAD ? true : Boolean(levelEntity.dead);
+            levelEntity.entState = canonicalEntState;
+            levelEntity.dead = canonicalEntState === EntityState.DEAD ? true : Boolean(levelEntity.dead);
             levelEntity.facingLeft = flags.bLeft;
             levelEntity.bRunning = flags.bRunning;
             levelEntity.bJumping = flags.bJumping;
@@ -4225,7 +4247,7 @@ export class LevelHandler {
 
         if (
             isEnemyEntity &&
-            entState === EntityState.DEAD &&
+            canonicalEntState === EntityState.DEAD &&
             MissionHandler.shouldWaitForEnemyKillStateMissionProgress(client, ent) &&
             !Boolean(ent.questDefeatProcessed)
         ) {
@@ -4261,7 +4283,7 @@ export class LevelHandler {
                 deltaX,
                 deltaY,
                 deltaVX,
-                entState,
+                canonicalEntState,
                 flags,
                 isAirborne,
                 velocityY
@@ -4288,7 +4310,7 @@ export class LevelHandler {
                     deltaX,
                     deltaY,
                     deltaVX,
-                    entState,
+                    canonicalEntState,
                     flags,
                     isAirborne,
                     velocityY
