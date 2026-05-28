@@ -4,6 +4,143 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+DEV_URL="${DEV_URL:-http://localhost:8000/}"
+FLASH_BROWSER_APP_NAME="${FLASH_BROWSER_APP_NAME:-FlashBrowser}"
+FLASH_BROWSER_PREFS_FILE="${FLASH_BROWSER_PREFS_FILE:-$HOME/Library/Application Support/Flash Browser/user-preferences.json}"
+FLASH_BROWSER_OPEN_ATTEMPTS="${FLASH_BROWSER_OPEN_ATTEMPTS:-120}"
+FLASH_BROWSER_OPEN_DELAY_SECONDS="${FLASH_BROWSER_OPEN_DELAY_SECONDS:-1}"
+
+configure_flashbrowser_homepage() {
+  local prefs_file="$1"
+  local url="$2"
+
+  node - "$prefs_file" "$url" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const [prefsFile, url] = process.argv.slice(2);
+
+fs.mkdirSync(path.dirname(prefsFile), { recursive: true });
+
+let preferences = {};
+try {
+  preferences = JSON.parse(fs.readFileSync(prefsFile, "utf8"));
+} catch {
+  preferences = {};
+}
+
+preferences.homepage = url;
+fs.writeFileSync(prefsFile, `${JSON.stringify(preferences)}\n`);
+NODE
+}
+
+quit_flashbrowser() {
+  local app_name="$1"
+
+  osascript - "$app_name" <<'APPLESCRIPT'
+on run argv
+  set appName to item 1 of argv
+  tell application appName to quit
+end run
+APPLESCRIPT
+}
+
+force_flashbrowser_location() {
+  local app_name="$1"
+  local url="$2"
+
+  osascript - "$app_name" "$url" <<'APPLESCRIPT'
+on run argv
+  set appName to item 1 of argv
+  set targetUrl to item 2 of argv
+  set the clipboard to targetUrl
+
+  tell application appName to activate
+  delay 1.5
+
+  tell application "System Events"
+    keystroke "l" using command down
+    delay 0.15
+    keystroke "v" using command down
+    delay 0.15
+    key code 36
+  end tell
+end run
+APPLESCRIPT
+}
+
+open_flashbrowser_url() {
+  local url="$1"
+  local app_name="$2"
+  local prefs_file="$3"
+  local homepage_configured="false"
+
+  if configure_flashbrowser_homepage "$prefs_file" "$url"; then
+    homepage_configured="true"
+    echo "FlashBrowser homepage set to $url"
+  else
+    echo "NOTE: Could not update FlashBrowser homepage preferences."
+  fi
+
+  quit_flashbrowser "$app_name" >/dev/null 2>&1 || true
+  sleep 1
+
+  if ! open -a "$app_name" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [[ "$homepage_configured" != "true" ]]; then
+    if ! force_flashbrowser_location "$app_name" "$url" >/dev/null 2>&1; then
+      echo "NOTE: FlashBrowser opened, but Terminal could not automate the URL bar."
+      echo "If macOS asks for permission, allow Terminal to control FlashBrowser/System Events."
+    fi
+  fi
+
+  return 0
+}
+
+open_flashbrowser_when_ready() {
+  local url="$1"
+  local app_name="$2"
+  local attempts="$3"
+  local delay_seconds="$4"
+  local attempt
+  local total_seconds
+
+  total_seconds=$((attempts * delay_seconds))
+
+  echo "Waiting for $url before opening $app_name..."
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+      echo "Opening $url in $app_name..."
+
+      if ! open_flashbrowser_url "$url" "$app_name" "$FLASH_BROWSER_PREFS_FILE"; then
+        echo "WARNING: Could not open $app_name."
+        echo "Install FlashBrowser, or set FLASH_BROWSER_APP_NAME to the installed app name."
+        echo "Then open $url manually."
+      fi
+
+      return 0
+    fi
+
+    sleep "$delay_seconds"
+  done
+
+  echo "WARNING: $url did not become ready after $total_seconds seconds."
+  echo "Open it manually in $app_name once the server is ready."
+}
+
+FLASH_BROWSER_WATCHER_PID=""
+
+cleanup_flashbrowser_watcher() {
+  if [[ -n "$FLASH_BROWSER_WATCHER_PID" ]]; then
+    kill "$FLASH_BROWSER_WATCHER_PID" >/dev/null 2>&1 || true
+  fi
+}
+
+trap cleanup_flashbrowser_watcher EXIT
+
 echo "Dungeon Blitz (local dev server)"
 echo
 
@@ -84,8 +221,10 @@ echo "Discord chat relay mode: $DISCORD_SOCIAL_CHAT_RELAY_MODE"
 echo "Discord Social SDK app id: $DISCORD_SOCIAL_APP_ID"
 echo "Discord Social SDK device flow: $DISCORD_SOCIAL_DEVICE_FLOW"
 echo "Discord Social SDK bridge: $DISCORD_SOCIAL_BRIDGE_EXECUTABLE"
-echo "When it's ready, open the URL shown in the logs."
+echo "FlashBrowser URL: $DEV_URL"
 echo
+open_flashbrowser_when_ready "$DEV_URL" "$FLASH_BROWSER_APP_NAME" "$FLASH_BROWSER_OPEN_ATTEMPTS" "$FLASH_BROWSER_OPEN_DELAY_SECONDS" &
+FLASH_BROWSER_WATCHER_PID=$!
 set +e
 npm run dev:with-discord
 EXIT_CODE=$?

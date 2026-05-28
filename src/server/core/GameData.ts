@@ -49,6 +49,7 @@ export class GameData {
     private static GEAR_DROP_RULES_BY_ID: Record<number, GearDropRule[]> = {};
     private static GEAR_DROP_RULES_LOADED = false;
     private static BOSS_DROP_DUNGEON_BY_SOURCE: Record<string, string> = {};
+    private static DUNGEON_BOSS_ENTITY_KEYS_BY_LEVEL: Record<string, Set<string>> = {};
     private static REALM_DROP_DUNGEON_BY_SOURCE_LEVEL: Record<string, Set<string>> = {};
     private static GEAR_DROP_LOCATION_MAPS_LOADED = false;
     private static readonly BOSS_ENTITY_NAME_ALIASES = new Set<string>([
@@ -182,6 +183,7 @@ export class GameData {
 
         GameData.loadGearDropRules(dataDir);
         GameData.loadGearDropLocationMaps(dataDir);
+        GameData.loadDungeonBossEntityMaps(dataDir);
     }
 
 
@@ -453,6 +455,71 @@ export class GameData {
         }
     }
 
+    private static addDungeonBossEntityKey(levelNameOrKey: string | null | undefined, entityName: string | null | undefined): void {
+        const dungeonKey = GameData.normalizeDungeonLevelKey(levelNameOrKey);
+        const bossKey = GameData.normalizeLookupKey(GameData.normalizeEntityDropName(entityName));
+        if (!dungeonKey || !bossKey) {
+            return;
+        }
+
+        const existing = GameData.DUNGEON_BOSS_ENTITY_KEYS_BY_LEVEL[dungeonKey] ?? new Set<string>();
+        existing.add(bossKey);
+        GameData.DUNGEON_BOSS_ENTITY_KEYS_BY_LEVEL[dungeonKey] = existing;
+    }
+
+    private static loadDungeonBossEntityMaps(dataDir: string): void {
+        GameData.DUNGEON_BOSS_ENTITY_KEYS_BY_LEVEL = {};
+
+        for (const [bossKey, dungeonKey] of Object.entries(GameData.BOSS_DROP_DUNGEON_BY_SOURCE)) {
+            GameData.addDungeonBossEntityKey(dungeonKey, bossKey);
+        }
+
+        const npcDir = path.join(dataDir, 'npcs');
+        if (!fs.existsSync(npcDir)) {
+            console.warn('[GameData] NPC directory not found; dungeon boss regen will use gear boss locations only.');
+            return;
+        }
+
+        let rawNpcBossCount = 0;
+        try {
+            for (const file of fs.readdirSync(npcDir)) {
+                if (!file.endsWith('.json')) {
+                    continue;
+                }
+
+                const levelName = path.basename(file, '.json');
+                const normalizedLevel = LevelConfig.normalizeLevelName(levelName) || levelName;
+                if (!LevelConfig.isDungeonLevel(normalizedLevel)) {
+                    continue;
+                }
+
+                const npcs = readJsonFile<any[]>(path.join(npcDir, file));
+                if (!Array.isArray(npcs)) {
+                    continue;
+                }
+
+                for (const npc of npcs) {
+                    if (Number(npc?.team ?? 0) !== 2) {
+                        continue;
+                    }
+                    const npcName = String(npc?.name ?? '').trim();
+                    if (!npcName || GameData.getEntityRank(npc) !== 'Boss') {
+                        continue;
+                    }
+
+                    GameData.addDungeonBossEntityKey(normalizedLevel, npcName);
+                    rawNpcBossCount += 1;
+                }
+            }
+
+            console.log(
+                `[GameData] Loaded dungeon boss regen map for ${Object.keys(GameData.DUNGEON_BOSS_ENTITY_KEYS_BY_LEVEL).length} dungeons (${rawNpcBossCount} raw NPC boss entries).`
+            );
+        } catch (err) {
+            console.error('[GameData] Failed to load raw NPC dungeon boss map:', err);
+        }
+    }
+
     private static findClientContentPath(dataDir: string, ...segments: string[]): string | null {
         const candidates = [
             path.resolve(dataDir, '..', '..', 'client', 'content', ...segments),
@@ -596,12 +663,7 @@ export class GameData {
 
         const bossKey = GameData.normalizeLookupKey(GameData.normalizeEntityDropName(entityName));
         const dungeonKey = GameData.normalizeDungeonLevelKey(normalizedLevel || levelName);
-        const mappedDungeonKey = bossKey ? GameData.BOSS_DROP_DUNGEON_BY_SOURCE[bossKey] : '';
-        if (mappedDungeonKey) {
-            return mappedDungeonKey === dungeonKey;
-        }
-
-        return GameData.isBossEntity(entity);
+        return Boolean(dungeonKey && bossKey && GameData.DUNGEON_BOSS_ENTITY_KEYS_BY_LEVEL[dungeonKey]?.has(bossKey));
     }
 
     static isBossEntity(entity: any): boolean {

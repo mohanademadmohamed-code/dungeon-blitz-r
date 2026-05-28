@@ -271,6 +271,42 @@ function testPlayerRegenUsesEntityHealEncoding(): void {
     });
 }
 
+function testPlayerRegenSeedsMissingActivityAndTrustsAuthoritativeHp(): void {
+    resetState();
+
+    const nowMs = 10_000;
+    const player = createFakeClient(14, 'Xi', 29);
+    player.authoritativeMaxHp = 1000;
+    player.authoritativeCurrentHp = 600;
+    player.lastCombatActivityAt = 0;
+
+    attachPlayerEntity(player);
+    const playerEntity = player.entities.get(player.clientEntID)!;
+    playerEntity.hp = 1000;
+    playerEntity.maxHp = 1000;
+
+    const levelScope = getClientLevelScope(player as never);
+    GlobalState.levelEntities.get(levelScope)!.get(player.clientEntID)!.hp = 1000;
+    GlobalState.sessionsByToken.set(player.token, player as never);
+
+    CombatHandler.processOutOfCombatRegen(levelScope, nowMs);
+
+    assert.equal(player.authoritativeCurrentHp, 600, 'missing regen activity should be seeded without an immediate heal');
+    assert.equal(player.sentPackets.length, 0, 'missing regen activity should not emit an immediate packet');
+    assert.equal(player.lastCombatActivityAt, nowMs - 5_000, 'injured players should get a regen anchor when combat activity is missing');
+
+    CombatHandler.processOutOfCombatRegen(levelScope, nowMs + 1_000);
+
+    assert.equal(player.authoritativeCurrentHp, 700, 'player regen should use authoritative HP when entity snapshots are stale full');
+    assert.equal(playerEntity.hp, 700, 'stale player entity HP should be corrected by regen');
+    const regenPacket = player.sentPackets.find((packet) => packet.id === 0x3B);
+    assert.ok(regenPacket, 'seeded player regen should emit the heal packet on the next tick');
+    assert.deepEqual(parseRegenPacket(regenPacket!.payload), {
+        entityId: player.clientEntID,
+        amount: 100
+    });
+}
+
 function testAiHeartbeatContinuesPlayerRegenUntilFull(): void {
     resetState();
 
@@ -775,9 +811,254 @@ async function testKnownOverworldBossNameDoesNotUseDungeonBossRegen(): Promise<v
     }
 }
 
+function createRegenHostile(id: number, name: string, roomId: number, overrides: Record<string, unknown> = {}): any {
+    return {
+        id,
+        name,
+        isPlayer: false,
+        clientSpawned: true,
+        team: 2,
+        roomId,
+        entState: EntityState.ACTIVE,
+        dead: false,
+        hp: 400,
+        maxHp: 1000,
+        lastCombatActivityAt: 4_500,
+        lastCombatRegenTickAt: 0,
+        ...overrides
+    };
+}
+
+async function testDungeonBossRegenUsesFetchedBossList(): Promise<void> {
+    ensureOriginalGameDataLoaded();
+
+    const scenarios = [
+        {
+            levelName: 'DreamDragonDungeon',
+            bossName: 'YoungDragonDream',
+            blocked: [
+                { name: 'MagmaCyclopsBoss', entRank: 'Boss' },
+                { name: 'BanditGreatSpider', entRank: 'MiniBoss' }
+            ]
+        },
+        {
+            levelName: 'GoblinRiverDungeon',
+            bossName: 'GoblinBoss2',
+            blocked: [
+                { name: 'GoblinDagger', entRank: 'Minion' },
+                { name: 'BanditGreatSpider', entRank: 'MiniBoss' }
+            ]
+        },
+        {
+            levelName: 'BT_Mission2',
+            bossName: 'BanditBoss',
+            blocked: [
+                { name: 'BanditGreatSpider', entRank: 'MiniBoss' },
+                { name: 'YoungDragonDream', entRank: 'Boss' }
+            ]
+        }
+    ];
+
+    for (const [scenarioIndex, scenario] of scenarios.entries()) {
+        resetState();
+
+        const player = createFakeClient(20 + scenarioIndex, `BossList${scenarioIndex}`, 41 + scenarioIndex);
+        moveClientToLevel(player, scenario.levelName);
+        player.authoritativeCurrentHp = 0;
+        player.enemyDeathRegenArmed = true;
+
+        const bossId = 910000 + (scenarioIndex * 10);
+        const boss = createRegenHostile(bossId, scenario.bossName, player.currentRoomId);
+        const blockedEntities = scenario.blocked.map((blocked, blockedIndex) => createRegenHostile(
+            bossId + blockedIndex + 1,
+            blocked.name,
+            player.currentRoomId,
+            { entRank: blocked.entRank }
+        ));
+
+        const levelScope = getClientLevelScope(player as never);
+        GlobalState.levelEntities.set(levelScope, new Map<number, any>([
+            [boss.id, boss],
+            ...blockedEntities.map((entity) => [entity.id, entity] as [number, any])
+        ]));
+        player.knownEntityIds.add(boss.id);
+        for (const entity of blockedEntities) {
+            player.knownEntityIds.add(entity.id);
+        }
+        GlobalState.sessionsByToken.set(player.token, player as never);
+
+        CombatHandler.processOutOfCombatRegen(levelScope, 10_500);
+
+        assert.equal(boss.hp, 410, `${scenario.levelName} listed boss should regenerate`);
+        for (const entity of blockedEntities) {
+            assert.equal(entity.hp, 400, `${scenario.levelName} unlisted ${entity.name} should not regenerate`);
+        }
+
+        const regenPackets = player.sentPackets
+            .filter((packet) => packet.id === 0x3B)
+            .map((packet) => parseRegenPacket(packet.payload));
+        assert.deepEqual(regenPackets.filter((packet) => packet.entityId === boss.id), [{ entityId: boss.id, amount: 10 }]);
+        for (const entity of blockedEntities) {
+            assert.deepEqual(regenPackets.filter((packet) => packet.entityId === entity.id), []);
+        }
+    }
+}
+
+async function testClientOnlyBossRegenDoesNotHealNormalEnemies(): Promise<void> {
+    resetState();
+    ensureOriginalGameDataLoaded();
+
+    const nowMs = 10_000;
+    const player = createFakeClient(15, 'Omicron', 31);
+    moveClientToLevel(player, 'DreamDragonDungeon');
+    attachPlayerEntity(player);
+
+    const bossId = 900015;
+    const boss = {
+        id: bossId,
+        name: 'YoungDragonDream',
+        isPlayer: false,
+        clientSpawned: true,
+        team: 2,
+        roomId: player.currentRoomId,
+        entState: EntityState.ACTIVE,
+        dead: false,
+        hp: 400,
+        maxHp: 1000,
+        lastCombatActivityAt: 0,
+        lastCombatRegenTickAt: 0
+    };
+    const normalId = 900016;
+    const normal = {
+        id: normalId,
+        name: 'GoblinDagger',
+        isPlayer: false,
+        clientSpawned: true,
+        team: 2,
+        roomId: player.currentRoomId,
+        entState: EntityState.ACTIVE,
+        dead: false,
+        hp: 400,
+        maxHp: 1000,
+        lastCombatActivityAt: 0,
+        lastCombatRegenTickAt: 0
+    };
+    const unlistedBossId = 900019;
+    const unlistedBoss = {
+        id: unlistedBossId,
+        name: 'UnlistedDungeonBoss',
+        entRank: 'Boss',
+        isPlayer: false,
+        clientSpawned: true,
+        team: 2,
+        roomId: player.currentRoomId,
+        entState: EntityState.ACTIVE,
+        dead: false,
+        hp: 400,
+        maxHp: 1000,
+        lastCombatActivityAt: 0,
+        lastCombatRegenTickAt: 0
+    };
+
+    const levelScope = getClientLevelScope(player as never);
+    player.entities.set(bossId, boss);
+    player.entities.set(normalId, normal);
+    player.entities.set(unlistedBossId, unlistedBoss);
+    player.knownEntityIds.add(bossId);
+    player.knownEntityIds.add(normalId);
+    player.knownEntityIds.add(unlistedBossId);
+    GlobalState.sessionsByToken.set(player.token, player as never);
+
+    const request = new BitBuffer(false);
+    request.writeMethod15(false);
+
+    const originalDateNow = Date.now;
+    try {
+        Date.now = () => nowMs;
+        await CombatHandler.handleRequestRespawn(player as never, request.toBuffer());
+
+        Date.now = () => nowMs + 500;
+        CombatHandler.processOutOfCombatRegen(levelScope, Date.now());
+
+        assert.equal(boss.hp, 410, 'client-only dungeon bosses should regenerate after player death');
+        assert.equal(normal.hp, 400, 'normal enemies should not receive boss regen');
+        assert.equal(unlistedBoss.hp, 400, 'generic boss-ranked enemies should not regen unless listed for that dungeon');
+        const regenPackets = player.sentPackets
+            .filter((packet) => packet.id === 0x3B)
+            .map((packet) => parseRegenPacket(packet.payload));
+        assert.deepEqual(regenPackets.filter((packet) => packet.entityId === bossId), [{ entityId: bossId, amount: 10 }]);
+        assert.deepEqual(regenPackets.filter((packet) => packet.entityId === normalId), []);
+        assert.deepEqual(regenPackets.filter((packet) => packet.entityId === unlistedBossId), []);
+    } finally {
+        Date.now = originalDateNow;
+    }
+}
+
+async function testAuthoritativeDeadPlayerStateAllowsBossRegen(): Promise<void> {
+    resetState();
+    ensureOriginalGameDataLoaded();
+
+    const nowMs = 10_000;
+    const player = createFakeClient(16, 'Pi', 33);
+    moveClientToLevel(player, 'DreamDragonDungeon');
+    player.authoritativeCurrentHp = 0;
+    player.enemyDeathRegenArmed = true;
+
+    const bossId = 900017;
+    const boss = {
+        id: bossId,
+        name: 'YoungDragonDream',
+        isPlayer: false,
+        clientSpawned: true,
+        team: 2,
+        roomId: player.currentRoomId,
+        entState: EntityState.ACTIVE,
+        dead: false,
+        hp: 400,
+        maxHp: 1000,
+        lastCombatActivityAt: nowMs - 5_500,
+        lastCombatRegenTickAt: 0
+    };
+    const normalId = 900018;
+    const normal = {
+        id: normalId,
+        name: 'GoblinDagger',
+        isPlayer: false,
+        clientSpawned: true,
+        team: 2,
+        roomId: player.currentRoomId,
+        entState: EntityState.ACTIVE,
+        dead: false,
+        hp: 400,
+        maxHp: 1000,
+        lastCombatActivityAt: nowMs - 5_500,
+        lastCombatRegenTickAt: 0
+    };
+
+    const levelScope = getClientLevelScope(player as never);
+    GlobalState.levelEntities.set(levelScope, new Map<number, any>([
+        [bossId, boss],
+        [normalId, normal]
+    ]));
+    player.knownEntityIds.add(bossId);
+    player.knownEntityIds.add(normalId);
+    GlobalState.sessionsByToken.set(player.token, player as never);
+
+    CombatHandler.processOutOfCombatRegen(levelScope, nowMs + 500);
+
+    assert.equal(boss.hp, 410, 'authoritative dead player state should allow boss regen');
+    assert.equal(normal.hp, 400, 'authoritative dead player state should still not heal normal enemies');
+    const regenPackets = player.sentPackets
+        .filter((packet) => packet.id === 0x3B)
+        .map((packet) => parseRegenPacket(packet.payload));
+    assert.deepEqual(regenPackets.filter((packet) => packet.entityId === bossId), [{ entityId: bossId, amount: 10 }]);
+    assert.deepEqual(regenPackets.filter((packet) => packet.entityId === normalId), []);
+}
+
 async function run(): Promise<void> {
     testPlayerRegenAfterIdleDoesNotHealLivingPlayerBoss();
     testPlayerRegenUsesEntityHealEncoding();
+    testPlayerRegenSeedsMissingActivityAndTrustsAuthoritativeHp();
     testAiHeartbeatContinuesPlayerRegenUntilFull();
     testDeadPlayerDoesNotRegen();
     testStaleHundredHpSnapshotDoesNotShrinkPlayerRegen();
@@ -789,6 +1070,9 @@ async function run(): Promise<void> {
     await testRespawnRequestMarksDeadBeforeArmingBossRegen();
     await testRespawnDoesNotFullHealBoss();
     await testKnownOverworldBossNameDoesNotUseDungeonBossRegen();
+    await testDungeonBossRegenUsesFetchedBossList();
+    await testClientOnlyBossRegenDoesNotHealNormalEnemies();
+    await testAuthoritativeDeadPlayerStateAllowsBossRegen();
     console.log('combat_regen_regression: ok');
 }
 
