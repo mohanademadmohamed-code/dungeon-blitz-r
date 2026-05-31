@@ -529,6 +529,14 @@ export class CombatHandler {
         if (!entity || entity.isPlayer) {
             return null;
         }
+        if (EntityHandler.isHomeDummyEntity(entity)) {
+            const maxHp = Math.max(1, CombatHandler.estimateHostileMaxHp(entity));
+            return {
+                maxHp,
+                currentHp: maxHp,
+                authoritativeKill: false
+            };
+        }
 
         const explicitMaxHp = Math.max(0, Math.round(Number(entity.maxHp ?? 0)));
         const rawHp = Number(entity.hp ?? NaN);
@@ -2106,6 +2114,28 @@ export class CombatHandler {
         const destroyedEntity =
             client.entities.get(entityId) ??
             (levelScope ? GlobalState.levelEntities.get(levelScope)?.get(entityId) : null);
+        if (EntityHandler.isHomeDummyEntity(destroyedEntity)) {
+            destroyedEntity.entState = EntityState.ACTIVE;
+            destroyedEntity.dead = false;
+            destroyedEntity.healthDelta = 0;
+            destroyedEntity.health_delta = 0;
+            destroyedEntity.hp = Math.max(
+                1,
+                Math.round(Number(destroyedEntity.maxHp ?? 0)) || CombatHandler.estimateHostileMaxHp(destroyedEntity)
+            );
+            if (levelScope) {
+                const scopedEntity = GlobalState.levelEntities.get(levelScope)?.get(entityId);
+                if (scopedEntity && scopedEntity !== destroyedEntity) {
+                    scopedEntity.entState = EntityState.ACTIVE;
+                    scopedEntity.dead = false;
+                    scopedEntity.healthDelta = 0;
+                    scopedEntity.health_delta = 0;
+                    scopedEntity.hp = destroyedEntity.hp;
+                }
+            }
+            EntityHandler.sendEntity(client, destroyedEntity);
+            return;
+        }
         const contributionSnapshot = destroyedEntity && !destroyedEntity.isPlayer && Number(destroyedEntity.team ?? 0) === EntityTeam.ENEMY
             ? CombatHandler.getContributionSnapshot(levelScope, entityId)
             : null;

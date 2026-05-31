@@ -56419,7 +56419,7 @@
 		<MeleeDamage>0</MeleeDamage>
 		<MagicDamage>1</MagicDamage>
 		<ArmorClass>1</ArmorClass>
-		<HitPoints>100</HitPoints>
+		<HitPoints>1000000</HitPoints>
 		<RewardClass>NoLoot</RewardClass>
 		<Realm>Object</Realm>
 		<Speed>0</Speed>
@@ -56444,7 +56444,7 @@
 		<MeleeDamage>0</MeleeDamage>
 		<MagicDamage>1</MagicDamage>
 		<ArmorClass>1</ArmorClass>
-		<HitPoints>100</HitPoints>
+		<HitPoints>1000000</HitPoints>
 		<RewardClass>NoLoot</RewardClass>
 		<Realm>Object</Realm>
 		<Speed>0</Speed>
@@ -56470,7 +56470,7 @@
 		<MeleeDamage>0</MeleeDamage>
 		<MagicDamage>1</MagicDamage>
 		<ArmorClass>1</ArmorClass>
-		<HitPoints>100</HitPoints>
+		<HitPoints>1000000</HitPoints>
 		<RewardClass>NoLoot</RewardClass>
 		<Realm>Object</Realm>
 		<Speed>0</Speed>

@@ -97,6 +97,10 @@ export class EntityHandler {
         return Boolean(entity?.dead) || Number(entity?.entState ?? EntityState.ACTIVE) === EntityState.DEAD;
     }
 
+    static isHomeDummyEntity(entity: any): boolean {
+        return /^HomeDummy[123]$/.test(String(entity?.name ?? entity?.EntName ?? entity?.entName ?? ''));
+    }
+
     private static shouldDeferLiveSharedHostileSeedToJoiner(joiner: Client, entity: any): boolean {
         return Boolean(joiner.currentLevel) &&
             EntityHandler.isPartySharedClientSpawnHostile(joiner.currentLevel, entity) &&

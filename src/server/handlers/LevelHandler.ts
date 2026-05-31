@@ -4281,6 +4281,20 @@ export class LevelHandler {
             !isSelf &&
             !ent.isPlayer &&
             Number(ent.team ?? 0) === EntityTeam.ENEMY;
+        if (isEnemyEntity && isDefeatEntState && EntityHandler.isHomeDummyEntity(levelEntity ?? ent)) {
+            ent.entState = EntityState.ACTIVE;
+            ent.dead = false;
+            ent.healthDelta = 0;
+            ent.health_delta = 0;
+            if (levelEntity && levelEntity !== ent) {
+                levelEntity.entState = EntityState.ACTIVE;
+                levelEntity.dead = false;
+                levelEntity.healthDelta = 0;
+                levelEntity.health_delta = 0;
+            }
+            EntityHandler.sendEntity(client, levelEntity ?? ent);
+            return;
+        }
         if (isEnemyEntity && isDefeatEntState) {
             const { CombatHandler } = require('./CombatHandler') as typeof import('./CombatHandler');
             const contributionSnapshot = CombatHandler.getContributionSnapshot(getClientLevelScope(client), entityId);
