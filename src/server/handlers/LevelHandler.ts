@@ -2983,7 +2983,9 @@ export class LevelHandler {
         return missionId === MissionID.TempleOfShadows ||
             missionId === MissionID.TempleOfShadowsHard ||
             missionId === MissionID.SlayMindlessQueen ||
-            missionId === MissionID.SlayMindlessQueenHard;
+            missionId === MissionID.SlayMindlessQueenHard ||
+            missionId === MissionID.SlayYornak ||
+            missionId === MissionID.SlayYornakHard;
     }
 
     private static getAdditionalDreadfoldGateRequiredMission(currentLevel: string, targetLevel: string): number {

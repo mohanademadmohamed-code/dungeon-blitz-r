@@ -53,6 +53,14 @@ type DungeonDoorCase = {
     dungeonTarget: string;
 };
 
+type QuestLockedDungeonDoorCase = {
+    label: string;
+    currentLevel: string;
+    doorId: number;
+    missionId: MissionID;
+    dungeonTarget: string;
+};
+
 const STORY_DOOR_CASES: StoryDoorCase[] = [
     {
         label: 'Black Rose Mire to Felbridge',
@@ -124,6 +132,16 @@ const DUNGEON_DOOR_CASES: DungeonDoorCase[] = [
     { currentLevel: 'CastleHard', doorId: 106, dungeonTarget: 'AC_Mission6Hard' },
     { currentLevel: 'JadeCity', doorId: 111, dungeonTarget: 'JC_Mission11' },
     { currentLevel: 'JadeCityHard', doorId: 111, dungeonTarget: 'JC_Mission11Hard' }
+];
+
+const QUEST_LOCKED_DUNGEON_DOOR_CASES: QuestLockedDungeonDoorCase[] = [
+    {
+        label: 'Mystery of the Yornak',
+        currentLevel: 'SwampRoadNorth',
+        doorId: 102,
+        missionId: MissionID.SlayYornak,
+        dungeonTarget: 'SRN_Mission2'
+    }
 ];
 
 function getRequiredDirectTravelMission(currentLevel: string, travelTarget: string): MissionID | null {
@@ -345,6 +363,55 @@ function testFirstTimeDungeonDoorsUseDungeonState(): void {
     }
 }
 
+function testQuestLockedDungeonDoorsRequireAcceptedMission(): void {
+    for (const testCase of QUEST_LOCKED_DUNGEON_DOOR_CASES) {
+        const lockedClient = createClient(testCase.currentLevel, testCase.missionId, 0);
+
+        LevelHandler.handleRequestDoorState(lockedClient as never, createDoorPacket(testCase.doorId));
+        LevelHandler.handleOpenDoor(lockedClient as never, createDoorPacket(testCase.doorId));
+
+        assert.deepEqual(
+            decodeDoorStatePacket(latestPacket(lockedClient, 0x42).payload),
+            {
+                doorId: testCase.doorId,
+                state: 4,
+                targetLevel: testCase.dungeonTarget,
+                stars: 0
+            },
+            `${testCase.label} should stay locked until the NPC grants the quest`
+        );
+        assert.equal(
+            lockedClient.sentPackets.some((packet) => packet.id === 0x2E),
+            false,
+            `${testCase.label} should not send a door target before quest acceptance`
+        );
+
+        const acceptedClient = createClient(testCase.currentLevel, testCase.missionId, 1);
+
+        LevelHandler.handleRequestDoorState(acceptedClient as never, createDoorPacket(testCase.doorId));
+        LevelHandler.handleOpenDoor(acceptedClient as never, createDoorPacket(testCase.doorId));
+
+        assert.deepEqual(
+            decodeDoorStatePacket(latestPacket(acceptedClient, 0x42).payload),
+            {
+                doorId: testCase.doorId,
+                state: 2,
+                targetLevel: testCase.dungeonTarget,
+                stars: 0
+            },
+            `${testCase.label} should show the dungeon once the quest is accepted`
+        );
+        assert.deepEqual(
+            decodeDoorTargetPacket(latestPacket(acceptedClient, 0x2E).payload),
+            {
+                doorId: testCase.doorId,
+                targetLevel: testCase.dungeonTarget
+            },
+            `${testCase.label} should transfer once the quest is accepted`
+        );
+    }
+}
+
 async function main(): Promise<void> {
     ensureDataLoaded();
     testUnfinishedStoryDoorsStillEnterTheirDungeon();
@@ -352,6 +419,7 @@ async function main(): Promise<void> {
     testClaimedOldSaveStoryDoorsStayMapTravelWithoutStars();
     testDirectWorldTravelDoorsUseTravelState();
     testFirstTimeDungeonDoorsUseDungeonState();
+    testQuestLockedDungeonDoorsRequireAcceptedMission();
     console.log('story_travel_door_regression: ok');
 }
 
