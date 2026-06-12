@@ -22,9 +22,12 @@ type ForgeState = {
     forge_roll_a: number;
     forge_roll_b: number;
     is_extended_forge: boolean;
+    free_speedup_reason?: string;
     stats_by_building: Record<string, number>;
     [key: string]: unknown;
 };
+
+type FreeSpeedupReason = 'tutorial_charm' | 'first_respec_stone';
 
 export class ForgeHandler {
     private static readonly FORGE_REROLL_COSTS = [1, 2, 3, 4, 5, 7, 10, 13, 16, 20] as const;
@@ -38,6 +41,8 @@ export class ForgeHandler {
     private static readonly CHARM_REMOVER_DURATION_SECONDS = 86400;
     private static readonly FREE_SPEEDUP_THRESHOLD_SECONDS = 180;
     private static readonly FREE_SPEEDUP_CLOCK_GRACE_SECONDS = 10;
+    private static readonly FREE_SPEEDUP_REASON_TUTORIAL_CHARM: FreeSpeedupReason = 'tutorial_charm';
+    private static readonly FREE_SPEEDUP_REASON_FIRST_RESPEC_STONE: FreeSpeedupReason = 'first_respec_stone';
     private static readonly FORGE_XP_CAP = 159_948;
     private static readonly DEFAULT_FORGE_XP_GAIN = 4000;
     private static readonly completionTimers = new Map<string, NodeJS.Timeout>();
@@ -270,6 +275,106 @@ export class ForgeHandler {
         return Math.max(1, Math.min(rawLevel || 1, ForgeHandler.FORGE_REROLL_COSTS.length));
     }
 
+    private static getFreeSpeedupUses(character: any): Record<string, boolean> {
+        if (!character.forgeFreeSpeedupUses || typeof character.forgeFreeSpeedupUses !== 'object' || Array.isArray(character.forgeFreeSpeedupUses)) {
+            character.forgeFreeSpeedupUses = {};
+        }
+
+        return character.forgeFreeSpeedupUses as Record<string, boolean>;
+    }
+
+    private static hasUsedFreeSpeedupReason(character: any, reason: FreeSpeedupReason): boolean {
+        return Boolean(ForgeHandler.getFreeSpeedupUses(character)[reason]);
+    }
+
+    private static markFreeSpeedupReasonUsed(character: any, reason: FreeSpeedupReason): void {
+        ForgeHandler.getFreeSpeedupUses(character)[reason] = true;
+    }
+
+    private static getCharmPrimaryId(charmId: number): number {
+        return Math.max(0, Number(charmId ?? 0)) & 0x1FF;
+    }
+
+    private static ownsPrimaryCharm(character: any, primaryId: number): boolean {
+        const charms = Array.isArray(character?.charms) ? character.charms : [];
+        return charms.some((entry: any) =>
+            Number(entry?.count ?? 0) > 0 &&
+            ForgeHandler.getCharmPrimaryId(Number(entry?.charmID ?? 0)) === primaryId
+        );
+    }
+
+    private static isCraftTownTutorialForgeContext(client: Client): boolean {
+        if (!client.character) {
+            return false;
+        }
+
+        const levelName = String(client.currentLevel || client.character?.CurrentLevel?.name || '').trim();
+        if (levelName !== 'CraftTown' && levelName !== 'CraftTownTutorial') {
+            return false;
+        }
+
+        if (Number(client.character?.questTrackerState ?? 0) < 100) {
+            return false;
+        }
+
+        const forgeState = ForgeHandler.ensureForgeState(client.character);
+        const stats = forgeState.stats_by_building ?? {};
+        const forgeRank = Number(stats['2'] ?? stats[2] ?? 0);
+        return forgeRank >= 1;
+    }
+
+    private static getNewForgeFreeSpeedupReason(client: Client, primaryId: number): FreeSpeedupReason | '' {
+        if (!client.character) {
+            return '';
+        }
+
+        if (
+            primaryId === CharmID.RespecStone &&
+            !ForgeHandler.hasUsedFreeSpeedupReason(client.character, ForgeHandler.FREE_SPEEDUP_REASON_FIRST_RESPEC_STONE)
+        ) {
+            return ForgeHandler.FREE_SPEEDUP_REASON_FIRST_RESPEC_STONE;
+        }
+
+        if (
+            primaryId !== CharmID.RespecStone &&
+            primaryId !== CharmID.CharmRemover &&
+            !ForgeHandler.hasUsedFreeSpeedupReason(client.character, ForgeHandler.FREE_SPEEDUP_REASON_TUTORIAL_CHARM) &&
+            !ForgeHandler.ownsPrimaryCharm(client.character, primaryId) &&
+            ForgeHandler.isCraftTownTutorialForgeContext(client)
+        ) {
+            return ForgeHandler.FREE_SPEEDUP_REASON_TUTORIAL_CHARM;
+        }
+
+        return '';
+    }
+
+    private static getSpecialFreeSpeedupReason(client: Client, forgeState: ForgeState): FreeSpeedupReason | '' {
+        if (!client.character) {
+            return '';
+        }
+
+        const storedReason = String(forgeState.free_speedup_reason ?? '') as FreeSpeedupReason;
+        if (
+            (storedReason === ForgeHandler.FREE_SPEEDUP_REASON_TUTORIAL_CHARM ||
+                storedReason === ForgeHandler.FREE_SPEEDUP_REASON_FIRST_RESPEC_STONE) &&
+            !ForgeHandler.hasUsedFreeSpeedupReason(client.character, storedReason)
+        ) {
+            return storedReason;
+        }
+
+        return ForgeHandler.getNewForgeFreeSpeedupReason(client, Number(forgeState.primary ?? 0));
+    }
+
+    private static markCompletedForgeMilestones(character: any, forgeState: ForgeState, primaryId: number): void {
+        const freeReason = String(forgeState.free_speedup_reason ?? '');
+        if (primaryId === CharmID.RespecStone) {
+            ForgeHandler.markFreeSpeedupReasonUsed(character, ForgeHandler.FREE_SPEEDUP_REASON_FIRST_RESPEC_STONE);
+        }
+        if (freeReason === ForgeHandler.FREE_SPEEDUP_REASON_TUTORIAL_CHARM) {
+            ForgeHandler.markFreeSpeedupReasonUsed(character, ForgeHandler.FREE_SPEEDUP_REASON_TUTORIAL_CHARM);
+        }
+    }
+
     private static randomRollSeed(): number {
         return Math.floor(Math.random() * 65536);
     }
@@ -283,6 +388,7 @@ export class ForgeHandler {
         forgeState.forge_roll_a = 0;
         forgeState.forge_roll_b = 0;
         forgeState.is_extended_forge = false;
+        forgeState.free_speedup_reason = '';
     }
 
     private static finalizeCompletedForgeIfNeeded(character: any): boolean {
@@ -480,6 +586,7 @@ export class ForgeHandler {
         forgeState.forge_roll_a = 0;
         forgeState.forge_roll_b = 0;
         forgeState.is_extended_forge = isExtendedForge;
+        forgeState.free_speedup_reason = ForgeHandler.getNewForgeFreeSpeedupReason(client, primary);
 
         await ForgeHandler.saveCharacter(client);
         await ForgeHandler.syncCompletionState(client);
@@ -506,11 +613,16 @@ export class ForgeHandler {
         }
 
         if (idolCost <= 0) {
-            if (!ForgeHandler.canUseFreeSpeedupWindow(forgeState)) {
+            const freeSpeedupReason = ForgeHandler.getSpecialFreeSpeedupReason(client, forgeState);
+            if (!freeSpeedupReason && !ForgeHandler.canUseFreeSpeedupWindow(forgeState)) {
                 return;
             }
 
             ForgeHandler.clearCompletionTimer(client.userId, client.character.name);
+            if (freeSpeedupReason) {
+                forgeState.free_speedup_reason = freeSpeedupReason;
+                ForgeHandler.markFreeSpeedupReasonUsed(client.character, freeSpeedupReason);
+            }
             ForgeHandler.completeActiveForgeNow(forgeState);
             await ForgeHandler.saveCharacter(client);
             ForgeHandler.sendForgeResultPacket(client, forgeState);
@@ -573,6 +685,7 @@ export class ForgeHandler {
             client.character.craftXP = Math.max(0, Number(client.character.craftXP ?? 0) + xpGain);
         }
 
+        ForgeHandler.markCompletedForgeMilestones(client.character, forgeState, primary);
         ForgeHandler.resetForgeState(forgeState);
         await ForgeHandler.saveCharacter(client);
     }

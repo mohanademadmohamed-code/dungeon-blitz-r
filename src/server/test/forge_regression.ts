@@ -20,6 +20,7 @@ type FakeClient = {
     sentPackets: SentPacket[];
     socket: { destroyed: boolean };
     authenticated: boolean;
+    currentLevel: string;
     sendBitBuffer(id: number, bb: BitBuffer): void;
 };
 
@@ -68,6 +69,7 @@ function createClient(): FakeClient {
         sentPackets,
         socket: { destroyed: false },
         authenticated: true,
+        currentLevel: '',
         sendBitBuffer(id: number, bb: BitBuffer): void {
             sentPackets.push({ id, payload: bb.toBuffer() });
         }
@@ -433,6 +435,88 @@ async function testCharmForgeSpeedupAcceptsZeroCostAtClientFreeBoundary(): Promi
     assert.equal(decoded.secondary, 2);
 }
 
+async function testTutorialCharmForgeSpeedupAcceptsZeroCostBeforeFreeBoundary(): Promise<void> {
+    const client = createClient();
+    client.currentLevel = 'CraftTown';
+    client.character.questTrackerState = 100;
+    client.character.magicForge = {
+        stats_by_building: { '2': 1 },
+        primary: CharmID.Trog01,
+        secondary: 2,
+        secondary_tier: 1,
+        usedlist: 1 << 1,
+        ReadyTime: Math.floor(Date.now() / 1000) + 1200,
+        forge_roll_a: 0,
+        forge_roll_b: 0,
+        is_extended_forge: false
+    };
+
+    await withMockedCharacterSave(async () =>
+        withPatchedRandom([0.25, 0.5], async () => {
+            await ForgeHandler.handleForgeSpeedUpPacket(client as never, createForgeSpeedupPacket(0));
+        })
+    );
+
+    assert.equal(client.character.mammothIdols, 20);
+    assert.equal(client.character.magicForge?.ReadyTime, 0);
+    assert.equal((client.character.forgeFreeSpeedupUses as Record<string, boolean>)?.tutorial_charm, true);
+    assert.equal(client.sentPackets.some((packet) => packet.id === 0xB5), false);
+    assert.ok(client.sentPackets.find((packet) => packet.id === 0xCD), 'tutorial charm free speedup should complete before the normal free window');
+}
+
+async function testFirstRespecStoneSpeedupAcceptsZeroCostBeforeFreeBoundary(): Promise<void> {
+    const client = createClient();
+    client.character.magicForge = {
+        stats_by_building: { '2': 5 },
+        primary: CharmID.RespecStone,
+        secondary: 0,
+        secondary_tier: 0,
+        usedlist: 0,
+        ReadyTime: Math.floor(Date.now() / 1000) + 259200,
+        forge_roll_a: 0,
+        forge_roll_b: 0,
+        is_extended_forge: true
+    };
+
+    await withMockedCharacterSave(async () =>
+        withPatchedRandom([0.25, 0.5], async () => {
+            await ForgeHandler.handleForgeSpeedUpPacket(client as never, createForgeSpeedupPacket(0));
+        })
+    );
+
+    assert.equal(client.character.mammothIdols, 20);
+    assert.equal(client.character.magicForge?.ReadyTime, 0);
+    assert.equal((client.character.forgeFreeSpeedupUses as Record<string, boolean>)?.first_respec_stone, true);
+    assert.equal(client.sentPackets.some((packet) => packet.id === 0xB5), false);
+    assert.ok(client.sentPackets.find((packet) => packet.id === 0xCD), 'first Respec Stone free speedup should complete before the normal free window');
+}
+
+async function testSecondRespecStoneSpeedupRejectsZeroCostBeforeFreeBoundary(): Promise<void> {
+    const client = createClient();
+    client.character.forgeFreeSpeedupUses = {
+        first_respec_stone: true
+    };
+    client.character.magicForge = {
+        stats_by_building: { '2': 5 },
+        primary: CharmID.RespecStone,
+        secondary: 0,
+        secondary_tier: 0,
+        usedlist: 0,
+        ReadyTime: Math.floor(Date.now() / 1000) + 259200,
+        forge_roll_a: 0,
+        forge_roll_b: 0,
+        is_extended_forge: true
+    };
+
+    await withMockedCharacterSave(async () => {
+        await ForgeHandler.handleForgeSpeedUpPacket(client as never, createForgeSpeedupPacket(0));
+    });
+
+    assert.notEqual(client.character.magicForge?.ReadyTime, 0);
+    assert.equal(client.sentPackets.some((packet) => packet.id === 0xCD), false, 'second Respec Stone zero-cost speedup should still be rejected before the normal free window');
+    assert.equal(client.sentPackets.some((packet) => packet.id === 0xB5), false);
+}
+
 async function testForgeSpeedupZeroCostAfterReadySendsCompletedResult(): Promise<void> {
     const client = createClient();
     client.character.magicForge = {
@@ -629,6 +713,9 @@ async function main(): Promise<void> {
     await testForgeSpeedupRejectsZeroCostBeforeReady();
     await testForgeSpeedupAcceptsZeroCostInFreeWindow();
     await testCharmForgeSpeedupAcceptsZeroCostAtClientFreeBoundary();
+    await testTutorialCharmForgeSpeedupAcceptsZeroCostBeforeFreeBoundary();
+    await testFirstRespecStoneSpeedupAcceptsZeroCostBeforeFreeBoundary();
+    await testSecondRespecStoneSpeedupRejectsZeroCostBeforeFreeBoundary();
     await testForgeSpeedupZeroCostAfterReadySendsCompletedResult();
     await testCollectForgeCharmAwardsCharmAndCraftXp();
     await testForgeRerollPreservesTierAndUpdatesUsedlist();
