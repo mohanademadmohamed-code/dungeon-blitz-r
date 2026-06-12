@@ -148,6 +148,13 @@ const QUEST_LOCKED_DUNGEON_DOOR_CASES: QuestLockedDungeonDoorCase[] = [
         doorId: 104,
         missionId: MissionID.DerelictionOfDuty,
         dungeonTarget: 'BT_Mission4'
+    },
+    {
+        label: 'Abandoned Armory',
+        currentLevel: 'OldMineMountain',
+        doorId: 104,
+        missionId: MissionID.AbandonedArmory,
+        dungeonTarget: 'OMM_Mission4'
     }
 ];
 

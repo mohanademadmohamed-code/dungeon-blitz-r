@@ -2987,7 +2987,9 @@ export class LevelHandler {
             missionId === MissionID.SlayYornak ||
             missionId === MissionID.SlayYornakHard ||
             missionId === MissionID.DerelictionOfDuty ||
-            missionId === MissionID.DerelictionOfDutyHard;
+            missionId === MissionID.DerelictionOfDutyHard ||
+            missionId === MissionID.AbandonedArmory ||
+            missionId === MissionID.AbandonedArmoryHard;
     }
 
     private static getAdditionalDreadfoldGateRequiredMission(currentLevel: string, targetLevel: string): number {
