@@ -292,6 +292,26 @@ async function testStartForgePrunesZeroCountMaterials(): Promise<void> {
     assert.deepEqual(client.character.materials, [], 'spent or already-empty material stacks should not remain in inventory');
 }
 
+async function testStartRespecStoneUsesThreeDayDuration(): Promise<void> {
+    const client = createClient();
+    const nowSeconds = 1_700_000_000;
+    const packet = createStartForgePacket(CharmID.RespecStone, [], [false, false, false, false]);
+
+    await withMockedDateNow(nowSeconds * 1000, async () =>
+        withMockedCharacterSave(async () =>
+            withCapturedTimers(async (_callbacks, delays) =>
+                withPatchedRandom([1], async () => {
+                    await ForgeHandler.handleStartForge(client as never, packet);
+                    assert.equal(client.character.magicForge?.primary, CharmID.RespecStone);
+                    assert.equal(client.character.magicForge?.ReadyTime, nowSeconds + 259200);
+                    assert.equal(client.character.magicForge?.is_extended_forge, true);
+                    assert.equal(delays[0], 259200000);
+                })
+            )
+        )
+    );
+}
+
 async function testForgeSpeedupCompletesImmediatelyAndSendsResultPacket(): Promise<void> {
     const client = createClient();
     client.character.magicForge = {
@@ -350,6 +370,35 @@ async function testForgeSpeedupRejectsZeroCostBeforeReady(): Promise<void> {
     assert.notEqual(client.character.magicForge?.ReadyTime, 0);
     assert.equal(client.sentPackets.some((packet) => packet.id === 0xCD), false, 'free speedup should not complete a still-running forge');
     assert.equal(client.sentPackets.some((packet) => packet.id === 0xB5), false, 'free speedup should not emit an idol purchase');
+}
+
+async function testForgeSpeedupAcceptsZeroCostInFreeWindow(): Promise<void> {
+    const client = createClient();
+    client.character.magicForge = {
+        stats_by_building: { '2': 5 },
+        primary: CharmID.RespecStone,
+        secondary: 0,
+        secondary_tier: 0,
+        usedlist: 0,
+        ReadyTime: Math.floor(Date.now() / 1000) + 120,
+        forge_roll_a: 0,
+        forge_roll_b: 0,
+        is_extended_forge: true
+    };
+
+    await withMockedCharacterSave(async () =>
+        withPatchedRandom([0.25, 0.5], async () => {
+            await ForgeHandler.handleForgeSpeedUpPacket(client as never, createForgeSpeedupPacket(0));
+        })
+    );
+
+    assert.equal(client.character.mammothIdols, 20);
+    assert.equal(client.character.magicForge?.ReadyTime, 0);
+    assert.equal(client.sentPackets.some((packet) => packet.id === 0xB5), false);
+
+    const resultPacket = client.sentPackets.find((packet) => packet.id === 0xCD);
+    assert.ok(resultPacket, 'free-window speedup should complete the forge without an idol purchase');
+    assert.equal(decodeForgeResultPacket(resultPacket!.payload).primary, CharmID.RespecStone);
 }
 
 async function testForgeSpeedupZeroCostAfterReadySendsCompletedResult(): Promise<void> {
@@ -543,8 +592,10 @@ async function testScheduledForgeCompletionRearmsWhenTimerFiresBeforeReadySecond
 async function main(): Promise<void> {
     await testStartForgeConsumesInputsAndQueuesState();
     await testStartForgePrunesZeroCountMaterials();
+    await testStartRespecStoneUsesThreeDayDuration();
     await testForgeSpeedupCompletesImmediatelyAndSendsResultPacket();
     await testForgeSpeedupRejectsZeroCostBeforeReady();
+    await testForgeSpeedupAcceptsZeroCostInFreeWindow();
     await testForgeSpeedupZeroCostAfterReadySendsCompletedResult();
     await testCollectForgeCharmAwardsCharmAndCraftXp();
     await testForgeRerollPreservesTierAndUpdatesUsedlist();

@@ -34,9 +34,9 @@ export class ForgeHandler {
     private static readonly BASE_CRAFT_TIME_BONUS_PERCENT = 5;
     private static readonly CRAFT_TIME_BONUS_PER_POINT = 0.5;
     private static readonly TIME_REDUCTION_MULTIPLIER = 0.01;
-    private static readonly EXTENDED_FORGE_DURATION_SECONDS = 345600;
-    private static readonly RESPEC_STONE_BASE_DURATION_SECONDS = 180;
+    private static readonly RESPEC_STONE_DURATION_SECONDS = 259200;
     private static readonly CHARM_REMOVER_DURATION_SECONDS = 86400;
+    private static readonly FREE_SPEEDUP_THRESHOLD_SECONDS = 180;
     private static readonly FORGE_XP_CAP = 159_948;
     private static readonly DEFAULT_FORGE_XP_GAIN = 4000;
     private static readonly completionTimers = new Map<string, NodeJS.Timeout>();
@@ -138,11 +138,9 @@ export class ForgeHandler {
         return Math.max(0, Math.min(totalBonus, 50));
     }
 
-    private static computeForgeDurationSeconds(character: any, primaryId: number, forgeFlags: { is_extended_forge: boolean }): number {
+    private static computeForgeDurationSeconds(character: any, primaryId: number): number {
         if (primaryId === CharmID.RespecStone) {
-            return forgeFlags.is_extended_forge
-                ? ForgeHandler.EXTENDED_FORGE_DURATION_SECONDS
-                : ForgeHandler.RESPEC_STONE_BASE_DURATION_SECONDS;
+            return ForgeHandler.RESPEC_STONE_DURATION_SECONDS;
         }
 
         if (primaryId === CharmID.CharmRemover) {
@@ -308,6 +306,23 @@ export class ForgeHandler {
         return true;
     }
 
+    private static canUseFreeSpeedupWindow(forgeState: ForgeState): boolean {
+        const primary = Number(forgeState.primary ?? 0);
+        const readyTime = Number(forgeState.ReadyTime ?? 0);
+        if (primary <= 0 || readyTime <= 0) {
+            return false;
+        }
+
+        const remainingSeconds = readyTime - ForgeHandler.getNowSeconds();
+        return remainingSeconds > 0 && remainingSeconds <= ForgeHandler.FREE_SPEEDUP_THRESHOLD_SECONDS;
+    }
+
+    private static completeActiveForgeNow(forgeState: ForgeState): void {
+        forgeState.ReadyTime = 0;
+        forgeState.forge_roll_a = ForgeHandler.randomRollSeed();
+        forgeState.forge_roll_b = ForgeHandler.randomRollSeed();
+    }
+
     static async syncCompletionState(client: Client): Promise<void> {
         if (!client.character) {
             return;
@@ -444,9 +459,7 @@ export class ForgeHandler {
         }
 
         const isExtendedForge = primary === CharmID.RespecStone;
-        const durationSeconds = ForgeHandler.computeForgeDurationSeconds(client.character, primary, {
-            is_extended_forge: isExtendedForge
-        });
+        const durationSeconds = ForgeHandler.computeForgeDurationSeconds(client.character, primary);
         const readyTime = ForgeHandler.getNowSeconds() + durationSeconds;
         const { secondary, tier } = ForgeHandler.pickSecondaryRune(
             primary,
@@ -490,7 +503,19 @@ export class ForgeHandler {
             return;
         }
 
-        if (idolCost <= 0 || Number(client.character.mammothIdols ?? 0) < idolCost) {
+        if (idolCost <= 0) {
+            if (!ForgeHandler.canUseFreeSpeedupWindow(forgeState)) {
+                return;
+            }
+
+            ForgeHandler.clearCompletionTimer(client.userId, client.character.name);
+            ForgeHandler.completeActiveForgeNow(forgeState);
+            await ForgeHandler.saveCharacter(client);
+            ForgeHandler.sendForgeResultPacket(client, forgeState);
+            return;
+        }
+
+        if (Number(client.character.mammothIdols ?? 0) < idolCost) {
             return;
         }
 
@@ -498,9 +523,7 @@ export class ForgeHandler {
         client.character.mammothIdols = Number(client.character.mammothIdols ?? 0) - idolCost;
         ForgeHandler.sendPremiumPurchase(client, 'Forge Speed-Up', idolCost);
 
-        forgeState.ReadyTime = 0;
-        forgeState.forge_roll_a = ForgeHandler.randomRollSeed();
-        forgeState.forge_roll_b = ForgeHandler.randomRollSeed();
+        ForgeHandler.completeActiveForgeNow(forgeState);
 
         await ForgeHandler.saveCharacter(client);
         ForgeHandler.sendForgeResultPacket(client, forgeState);
