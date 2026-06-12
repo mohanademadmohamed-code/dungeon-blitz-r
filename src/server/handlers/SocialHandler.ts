@@ -1829,14 +1829,17 @@ export class SocialHandler {
 
     static handleStartSkit(client: Client, data: Buffer): void {
         const br = new BitReader(data);
-        const entityId = br.readMethod9();
-        br.readMethod15();
+        const sourceEntityId = br.readMethod9();
+        const playerThought = br.readMethod15();
         const text = br.readMethod26();
+        const entityId = playerThought && client.clientEntID > 0
+            ? client.clientEntID
+            : sourceEntityId;
         const payload = SocialHandler.buildRoomThoughtPayload(
             entityId,
             SocialHandler.translateRoomThought(client, entityId, text)
         );
-        LevelHandler.maybeStartGoblinRiverBossIntroLock(client, entityId, text);
+        LevelHandler.maybeStartGoblinRiverBossIntroLock(client, sourceEntityId, text);
         MissionHandler.noteDungeonSkitActivity(client);
 
         SocialHandler.relayToLevel(client, 0x76, payload, true);
