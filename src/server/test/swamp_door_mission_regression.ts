@@ -129,9 +129,9 @@ function testSwampRoadNorthOnlyShowsAcceptedDungeonDoors(): void {
             .map((entry) => decodeDoorStatePacket(entry.payload)),
         [
             { doorId: 101, state: 2, targetLevel: 'SRN_Mission1', stars: 0 },
-            { doorId: 102, state: 2, targetLevel: 'SRN_Mission2', stars: 0 }
+            { doorId: 102, state: 4, targetLevel: 'SRN_Mission2', stars: 0 }
         ],
-        'Black Rose Mire should report startable dungeon doors as dungeon doors'
+        'Black Rose Mire should report accepted dungeon doors as dungeon doors and keep unaccepted ones locked'
     );
 }
 
@@ -195,8 +195,8 @@ function testLockedMindlessQueenDoorReportsLockedAndDoesNotTransfer(): void {
 
     LevelHandler.handleOpenDoor(client as never, createDoorPacket(106));
 
-    assert.equal(client.lastDoorId, undefined);
-    assert.equal(client.lastDoorTargetLevel, undefined);
+    assert.equal(client.lastDoorId, -1);
+    assert.equal(client.lastDoorTargetLevel, '');
     assert.equal(
         client.sentPackets.some((entry) => entry.id === 0x2E),
         false,
@@ -289,9 +289,10 @@ function testArachnaeTurnInMissionRemainsVisibleInFelbridge(): void {
         String(normalMission?.ZoneSet ?? '').split(',').map((zone) => zone.trim()).includes('BridgeTown'),
         'Arachnae should stay serialized in Felbridge so the tracker points to BT_Greeter after the dungeon'
     );
-    assert.ok(
-        String(hardMission?.ZoneSet ?? '').split(',').map((zone) => zone.trim()).includes('BridgeTownHard'),
-        'Dread Arachnae should stay serialized in Dread Felbridge so the tracker points to BT_GreeterHard'
+    assert.equal(
+        String(hardMission?.ZoneSet ?? ''),
+        'SwampRoadNorthHard',
+        'Dread Arachnae should match the original pre-#326 ZoneSet exactly'
     );
 }
 

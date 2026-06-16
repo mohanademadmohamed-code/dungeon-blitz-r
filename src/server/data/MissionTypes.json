@@ -2611,7 +2611,7 @@
         "MissionName": "ClearTheBridgeHard",
         "MissionID": "133",
         "PreReqMissions": "SlaySvathHard",
-        "ZoneSet": "SwampRoadNorthHard,BridgeTownHard",
+        "ZoneSet": "SwampRoadNorthHard",
         "Priority": "Story",
         "ContactName": "SRN_Mayor03Hard",
         "CompleteCount": "1",

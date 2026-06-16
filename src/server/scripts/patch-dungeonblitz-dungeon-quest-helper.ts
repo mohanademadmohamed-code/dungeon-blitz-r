@@ -45,8 +45,9 @@ function parseArgs(argv: string[]): { swfPath: string; verify: boolean } {
         "Usage:",
         "  ts-node src/server/scripts/patch-dungeonblitz-dungeon-quest-helper.ts [--verify] [--swf <path>]",
         "",
-        "Patches Game.SelectMissionToTrack so instanced dungeon levels clear only the",
-        "visual quest-helper tracking slot. Mission state/progress stays untouched.",
+        "Removes the old Game.SelectMissionToTrack dungeon guard. The server now",
+        "selects the mission linked to the current dungeon instead of letting the",
+        "Flash client blindly clear every tracked mission in instanced levels.",
       ].join("\n"));
       process.exit(0);
     }
@@ -277,6 +278,31 @@ function findExistingGuardPatchPoint(code: Buffer, names: string[]): { insertion
   throw new PatchError("Could not locate existing dungeon quest-helper guard patch point.");
 }
 
+function findExistingGuardRange(code: Buffer, names: string[]): { startOffset: number; endOffset: number } {
+  const instructions = disassemble(code, "Game.SelectMissionToTrack.guardRange");
+  for (let i = 0; i < instructions.length - 12; i += 1) {
+    const window = instructions.slice(i, i + 32);
+    if (
+      window[0]?.opcode === 0xd0 &&
+      window[1]?.opcode === 0x66 &&
+      u30OperandName(window[1], names) === "level" &&
+      window.some((item) => item.opcode === 0x66 && u30OperandName(item, names) === "bInstanced") &&
+      window.some((item) => item.opcode === 0x68 && u30OperandName(item, names) === "mTrackedMission") &&
+      window.some((item) => item.opcode === 0x66 && u30OperandName(item, names) === "screenQuestTracker")
+    ) {
+      const returnVoid = window.find((item) => item.opcode === 0x47);
+      if (!returnVoid) {
+        break;
+      }
+      return {
+        startOffset: window[0].offset,
+        endOffset: returnVoid.offset + returnVoid.size,
+      };
+    }
+  }
+  throw new PatchError("Could not locate existing dungeon quest-helper guard range.");
+}
+
 function buildBranchAdjustmentPatches(
   body: NonNullable<ReturnType<typeof findSelectMissionToTrackBody>["body"]>,
   code: Buffer,
@@ -313,87 +339,41 @@ function patchSwf(swfPath: string): void {
   const { ctx, abc, body } = findSelectMissionToTrackBody(swfPath);
   const code = ctx.body.subarray(body.codeStart, body.codeStart + body.codeLen);
   if (hasDungeonGuard(code, abc.multinameNames)) {
-    if (hasCraftTownTutorialExclusion(code, abc)) {
-      console.log(`${path.basename(swfPath)} already has the dungeon quest-helper guard.`);
-      return;
-    }
-
-    const patchPoint = findExistingGuardPatchPoint(code, abc.multinameNames);
-    const exclusion = buildCraftTownTutorialExclusion({
-      level: findMethodOperand(code, abc.multinameNames, 0x66, "level"),
-      internalName: findSingleMultiname(abc, "internalName"),
-      craftTownTutorialString: findStringIndex(abc, "CraftTownTutorial"),
-    }, patchPoint.insertionOffset, patchPoint.afterGuardOffset);
+    const guardRange = findExistingGuardRange(code, abc.multinameNames);
+    const removedLength = guardRange.endOffset - guardRange.startOffset;
     ensureBackup(swfPath);
     const patches: BytePatch[] = [
       {
-        key: "select-mission-code-len-crafttown-exclusion",
+        key: "select-mission-code-len-remove-dungeon-guard",
         start: body.codeLenPos,
         end: body.codeStart,
-        data: writeU30(body.codeLen + exclusion.length),
-        detail: "update Game.SelectMissionToTrack code length for CraftTownTutorial exclusion",
+        data: writeU30(body.codeLen - removedLength),
+        detail: "update Game.SelectMissionToTrack code length after removing dungeon guard",
       },
       {
-        key: "select-mission-crafttown-tutorial-exclusion",
-        start: body.codeStart + patchPoint.insertionOffset,
-        end: body.codeStart + patchPoint.insertionOffset,
-        data: exclusion,
-        detail: "let CraftTownTutorial use normal mission tracker progress",
+        key: "select-mission-remove-dungeon-guard",
+        start: body.codeStart + guardRange.startOffset,
+        end: body.codeStart + guardRange.endOffset,
+        data: Buffer.alloc(0),
+        detail: "remove blind instanced-dungeon tracked mission clearing",
       },
-      ...buildBranchAdjustmentPatches(body, code, patchPoint.insertionOffset, exclusion.length),
     ];
     const { body: patchedBody, delta } = applyPatchesToBody(ctx.body, patches);
     writeSwf(ctx, patchedBody, delta);
     verifySwf(swfPath);
-    console.log(`${path.basename(swfPath)} patched: CraftTownTutorial uses normal mission tracker progress.`);
+    console.log(`${path.basename(swfPath)} patched: removed blind dungeon quest-helper guard.`);
     return;
   }
 
-  const insertionOffset = locateInsertionOffset(code);
-  const guard = buildDungeonGuard({
-    level: findMethodOperand(code, abc.multinameNames, 0x66, "level"),
-    bInstanced: findSingleMultiname(abc, "bInstanced"),
-    internalName: findSingleMultiname(abc, "internalName"),
-    class13: findMethodOperand(code, abc.multinameNames, 0x80, "class_13"),
-    mTrackedMission: findMethodOperand(code, abc.multinameNames, 0x68, "mTrackedMission"),
-    screenQuestTracker: findMethodOperand(code, abc.multinameNames, 0x66, "screenQuestTracker"),
-    refresh: findMethodOperand(code, abc.multinameNames, 0x4f, "Refresh"),
-    craftTownTutorialString: findStringIndex(abc, "CraftTownTutorial"),
-  });
-
-  ensureBackup(swfPath);
-  const newCodeLen = body.codeLen + guard.length;
-  const patches: BytePatch[] = [
-    {
-      key: "select-mission-code-len",
-      start: body.codeLenPos,
-      end: body.codeStart,
-      data: writeU30(newCodeLen),
-      detail: "update Game.SelectMissionToTrack code length",
-    },
-    {
-      key: "select-mission-dungeon-guard",
-      start: body.codeStart + insertionOffset,
-      end: body.codeStart + insertionOffset,
-      data: guard,
-      detail: "clear visual tracked mission when current level is an instanced dungeon",
-    },
-  ];
-
-  const { body: patchedBody, delta } = applyPatchesToBody(ctx.body, patches);
-  writeSwf(ctx, patchedBody, delta);
   verifySwf(swfPath);
-  console.log(`${path.basename(swfPath)} patched: dungeon quest helper now prioritizes dungeon progress.`);
+  console.log(`${path.basename(swfPath)} already has normal mission tracker selection.`);
 }
 
 function verifySwf(swfPath: string): void {
   const { ctx, abc, body } = findSelectMissionToTrackBody(swfPath);
   const code = ctx.body.subarray(body.codeStart, body.codeStart + body.codeLen);
-  if (!hasDungeonGuard(code, abc.multinameNames)) {
-    throw new PatchError(`${path.basename(swfPath)} is missing the dungeon quest-helper guard.`);
-  }
-  if (!hasCraftTownTutorialExclusion(code, abc)) {
-    throw new PatchError(`${path.basename(swfPath)} is missing the CraftTownTutorial quest-helper exclusion.`);
+  if (hasDungeonGuard(code, abc.multinameNames)) {
+    throw new PatchError(`${path.basename(swfPath)} still has the blind dungeon quest-helper guard.`);
   }
   console.log(`${path.basename(swfPath)} verify ok.`);
 }

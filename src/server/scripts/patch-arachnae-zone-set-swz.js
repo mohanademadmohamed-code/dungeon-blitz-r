@@ -99,7 +99,7 @@ function patchMissionTypes(xml) {
 
     for (const [missionName, zoneSet] of [
         ['ClearTheBridge', 'SwampRoadNorth,BridgeTown'],
-        ['ClearTheBridgeHard', 'SwampRoadNorthHard,BridgeTownHard']
+        ['ClearTheBridgeHard', 'SwampRoadNorthHard']
     ]) {
         const result = patchMissionZoneSet(current, missionName, zoneSet);
         current = result.xml;
