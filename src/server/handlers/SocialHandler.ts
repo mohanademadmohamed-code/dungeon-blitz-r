@@ -168,9 +168,7 @@ export class SocialHandler {
 
     private static buildLocalizationReloadUrl(language: string, gender?: string): string {
         const portSuffix = Config.STATIC_PORT === 80 ? '' : `:${Config.STATIC_PORT}`;
-        const url = new URL(`http://${Config.HOST}${portSuffix}/p/cbp/DungeonBlitz.swf`);
-        url.searchParams.set('fv', 'cdb');
-        url.searchParams.set('gv', 'cdb');
+        const url = new URL(`http://${Config.HOST}${portSuffix}/`);
         url.searchParams.set('lang', language);
         if (language === 'pt-br') {
             const normalizedGender = SocialHandler.normalizeReloadGender(gender);
@@ -181,7 +179,7 @@ export class SocialHandler {
         return url.toString();
     }
 
-    private static sendLocalizationReload(target: Client | null | undefined, language: string): void {
+    static sendLocalizationReload(target: Client | null | undefined, language: string): void {
         SocialHandler.sendChatStatus(
             target,
             `${SocialHandler.LOCALIZATION_RELOAD_PREFIX}${SocialHandler.buildLocalizationReloadUrl(language, target?.character?.gender)}`

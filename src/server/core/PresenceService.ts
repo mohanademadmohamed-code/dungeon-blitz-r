@@ -10,6 +10,7 @@ import { MissionLoader } from '../data/MissionLoader';
 export interface PresenceSnapshot {
     characterName: string;
     characterClass: string;
+    characterGender: string;
     levelKey: string;
     levelName: string;
     areaKey: string;
@@ -306,6 +307,7 @@ export class PresenceService {
         return {
             characterName,
             characterClass: className,
+            characterGender: String(client.character?.gender ?? ''),
             levelKey,
             levelName,
             areaKey,

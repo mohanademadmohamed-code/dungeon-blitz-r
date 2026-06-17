@@ -13,6 +13,7 @@ type RawDialogueCondition = {
 type RawDialogueEntry = {
     displayName?: string;
     defaultLines?: string[];
+    scriptedText?: string;
     conditionalLines?: RawDialogueCondition[];
 };
 
@@ -30,6 +31,7 @@ export interface NpcDialogueCondition {
 export interface NpcDialogueEntry {
     displayName?: string;
     defaultLines: string[];
+    scriptedText?: string;
     conditionalLines: NpcDialogueCondition[];
 }
 
@@ -101,19 +103,21 @@ export class NpcDialogueLoader {
 
     private static normalizeEntry(raw: RawDialogueEntry): NpcDialogueEntry | null {
         const defaultLines = this.sanitizeLines(raw?.defaultLines);
+        const scriptedText = String(raw?.scriptedText ?? '').trim() || undefined;
         const conditionalLines = Array.isArray(raw?.conditionalLines)
             ? raw.conditionalLines
                 .map((condition) => this.normalizeCondition(condition))
                 .filter((condition): condition is NpcDialogueCondition => Boolean(condition))
             : [];
 
-        if (!defaultLines.length && !conditionalLines.length) {
+        if (!defaultLines.length && !scriptedText && !conditionalLines.length) {
             return null;
         }
 
         return {
             displayName: String(raw?.displayName ?? '').trim() || undefined,
             defaultLines,
+            scriptedText,
             conditionalLines
         };
     }
@@ -198,6 +202,8 @@ export class NpcDialogueLoader {
             .replace(/\bDo\|Da\b/g, choose('Do', 'Da'))
             .replace(/\bverdadeiro\|verdadeira\b/g, choose('verdadeiro', 'verdadeira'))
             .replace(/\bVerdadeiro\|Verdadeira\b/g, choose('Verdadeiro', 'Verdadeira'))
+            .replace(/\bum herói digno\|uma heroína digna\b/g, choose('um herói digno', 'uma heroína digna'))
+            .replace(/\bum heroi digno\|uma heroina digna\b/g, choose('um herói digno', 'uma heroína digna'))
             .replace(/\bhumano\|humana\b/g, choose('humano', 'humana'))
             .replace(/\bHumano\|Humana\b/g, choose('Humano', 'Humana'))
             .replace(/\bobrigado\|obrigada\b/g, choose('obrigado', 'obrigada'))
@@ -332,5 +338,14 @@ export class NpcDialogueLoader {
         }
 
         return this.prepareLinesForClient(entry.defaultLines, character, locale);
+    }
+
+    static getScriptedTextForNpc(levelName: string, npcKey: string, character?: Character | null, locale: string = 'en'): string {
+        const entry = this.resolveEntry(levelName, npcKey, locale);
+        if (!entry?.scriptedText) {
+            return '';
+        }
+
+        return this.prepareLinesForClient([entry.scriptedText], character, locale)[0] ?? '';
     }
 }

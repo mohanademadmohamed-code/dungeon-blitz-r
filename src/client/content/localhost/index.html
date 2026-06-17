@@ -90,14 +90,43 @@
   <script>
     function normalizeGameLanguage(value) {
       const normalized = String(value || "").trim().toLowerCase();
+      if (normalized === "br" || normalized === "pt" || normalized === "ptbr" || normalized === "pt-br") {
+        return "pt-br";
+      }
       return normalized === "en" || normalized === "tr" ? normalized : "";
     }
 
-    const urlLanguage = normalizeGameLanguage(new URLSearchParams(window.location.search).get("lang"));
-    document.cookie = "db_lang=; path=/; max-age=0; SameSite=Lax";
+    function normalizeGameGender(value) {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized === "male" || normalized === "female" ? normalized : "";
+    }
 
-    const languageParam = urlLanguage ? `&lang=${urlLanguage}` : "";
-    const swfUrl = `p/cbp/DungeonBlitz.swf?fv=cdb&gv=cdb${languageParam}`;
+    function readCookie(name) {
+      const prefix = `${name}=`;
+      for (const entry of document.cookie.split(";")) {
+        const trimmed = entry.trim();
+        if (trimmed.startsWith(prefix)) {
+          return decodeURIComponent(trimmed.slice(prefix.length));
+        }
+      }
+      return "";
+    }
+
+    const urlLanguage = normalizeGameLanguage(new URLSearchParams(window.location.search).get("lang"));
+    if (urlLanguage) {
+      document.cookie = `db_lang=${urlLanguage}; path=/; max-age=31536000; SameSite=Lax`;
+    }
+
+    const urlGender = normalizeGameGender(new URLSearchParams(window.location.search).get("gender"));
+    if (urlGender) {
+      document.cookie = `db_gender=${urlGender}; path=/; max-age=31536000; SameSite=Lax`;
+    }
+
+    const selectedLanguage = urlLanguage || normalizeGameLanguage(readCookie("db_lang"));
+    const selectedGender = urlGender || normalizeGameGender(readCookie("db_gender"));
+    const languageParam = selectedLanguage ? `&lang=${selectedLanguage}` : "";
+    const genderParam = selectedLanguage === "pt-br" && selectedGender ? `&gender=${selectedGender}` : "";
+    const swfUrl = `p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl${languageParam}${genderParam}`;
     console.log("[DungeonBlitzHost] Loading SWF", swfUrl);
     const localBridgeBaseUrl = "http://127.0.0.1:47631";
     const selfPresenceUrl = "/api/presence/self";
@@ -161,6 +190,17 @@
           return;
         }
 
+        const sessionGender = normalizeGameGender(session.characterGender);
+        const storedGender = normalizeGameGender(readCookie("db_gender"));
+        if (selectedLanguage === "pt-br" && sessionGender && sessionGender !== storedGender) {
+          document.cookie = `db_gender=${sessionGender}; path=/; max-age=31536000; SameSite=Lax`;
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.set("lang", "pt-br");
+          nextUrl.searchParams.set("gender", sessionGender);
+          window.location.replace(nextUrl.toString());
+          return;
+        }
+
         const bridgePayload = {
           characterName: session.characterName,
           details: session.details,
@@ -196,7 +236,7 @@
       "100%",
       "10.0.0",
       null,
-      { fv: "cdb", gv: "cdb" },
+      { fv: "cdl", gv: "cdl" },
       { allowScriptAccess: "always", allowFullScreen: "true" },
       { id: "DungeonBlitz", name: "DungeonBlitz" },
       function (e) {

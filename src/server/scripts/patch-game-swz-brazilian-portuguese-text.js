@@ -20,6 +20,7 @@ const TRANSLATABLE_TAGS_BY_ROOT = new Map([
         'ActiveText',
         'Description',
         'DisplayName',
+        'ISayOnAccept',
         'OfferText',
         'PraiseText',
         'PreReqText',
@@ -65,6 +66,16 @@ const TOOLTIP_TYPE_REPLACEMENTS = new Map([
 const TRANSLATABLE_TAGS = new Set([...TRANSLATABLE_TAGS_BY_ROOT.values()].flatMap((tags) => [...tags]));
 const TRANSLATABLE_TAG_REGEX = new RegExp(`<(${[...TRANSLATABLE_TAGS].join('|')})>([\\s\\S]*?)<\\/\\1>`, 'g');
 const MISSION_DIALOGUE_TAGS = new Set(['OfferText', 'ActiveText', 'ReturnText', 'PraiseText']);
+const PTBR_EXCLUDED_MISSION_IDS = new Set([
+    // Felbridge hard-mode content is intentionally left out of the current
+    // Felbridge PT-BR pass. Translate the normal BridgeTown arc first.
+    '142',
+    '143',
+    '144',
+    '146',
+    '147',
+    '148'
+]);
 const MISSION_TEXT_ACCENT_FIXES = [
     [/Levado pela Mare/g, 'Levado pela Maré'],
     [/Capitao Fink/g, 'Capitão Fink'],
@@ -82,7 +93,8 @@ const MISSION_TEXT_ACCENT_FIXES = [
     [/\bAlguem\b/g, 'Alguém'],
     [/\balguem\b/g, 'alguém'],
     [/\bdefende-lo\b/g, 'defendê-lo'],
-    [/\bmissao\b/g, 'missão']
+    [/\bmissao\b/g, 'missão'],
+    [/ajudá-lá/g, 'ajudá-la']
 ];
 
 function applyMissionTextAccentFixes(value) {
@@ -92,6 +104,7 @@ function applyMissionTextAccentFixes(value) {
     }
     return current;
 }
+
 const GENERIC_TEXT_ACCENT_FIXES = [
     [/\bTome de Poder\b/g, 'Tomo do Poder'],
     [/\bnivel\b/g, 'nível'],
@@ -135,8 +148,10 @@ const FORCED_LEVEL_DISPLAY_NAMES = new Set([
     'SwampRoadConnectionHard',
     'BridgeTown',
     'BridgeTownHard',
+    'BT_Mission1',
     'OldMineMountain',
-    'OldMineMountainHard'
+    'OldMineMountainHard',
+    'CH_Mission7'
 ]);
 
 function repoRoot() {
@@ -268,7 +283,10 @@ function translateValue(value, translations, context) {
     }
 
     const exact = translations.get(normalizeKey(decoded));
-    if (exact && normalizeKey(exact) !== normalizeKey(decoded)) {
+    // An explicit reviewed translation is authoritative even when a proper
+    // name intentionally remains unchanged in PT-BR. Falling through here
+    // would replace names such as "Sir Edgar Hocke" with a generated fallback.
+    if (exact) {
         return exact;
     }
 
@@ -428,11 +446,13 @@ function deriveDisplayName(rootName, entry) {
             SwampRoadConnectionHard: 'Pântano da Rosa Negra (Sombrio)',
             BridgeTown: 'Felbridge',
             BridgeTownHard: 'Felbridge (Sombrio)',
+            BT_Mission1: 'Acampamento Bandido',
             OldMineMountain: 'Montanhas Stormshard',
             OldMineMountainHard: 'Montanhas Stormshard (Sombrio)',
             GoblinRiverDungeon: 'Acampamento Goblin',
             GhostBossDungeon: 'Atras de Nephit',
-            DreamDragonDungeon: 'Sonho do Dragao'
+            DreamDragonDungeon: 'Sonho do Dragao',
+            CH_Mission7: 'Condenados se Erguem'
         }));
         const levelName = getAttr(entry, 'LevelName');
         return exact.get(levelName) || localizeIdentifier(levelName);
@@ -519,8 +539,12 @@ function patchDerivedDisplayNames(xml, rootName, stats) {
 function patchMissionTypes(xml, translations, missions, stats) {
     return xml.replace(/<MissionType>[\s\S]*?<\/MissionType>/g, (entry) => {
         const missionId = entry.match(/<MissionID>(\d+)<\/MissionID>/)?.[1] || '';
+        let patchedEntry = entry;
         const missionDialogue = missions[missionId] || {};
-        return entry.replace(TRANSLATABLE_TAG_REGEX, (match, tagName, value) => {
+        if (PTBR_EXCLUDED_MISSION_IDS.has(missionId)) {
+            return patchedEntry;
+        }
+        patchedEntry = patchedEntry.replace(TRANSLATABLE_TAG_REGEX, (match, tagName, value) => {
             if (!shouldTranslateTag('MissionTypes', tagName)) {
                 return match;
             }
@@ -536,6 +560,8 @@ function patchMissionTypes(xml, translations, missions, stats) {
             stats.byTag[tagName] = (stats.byTag[tagName] || 0) + 1;
             return `<${tagName}>${escapeXmlText(accentedValue)}</${tagName}>`;
         });
+
+        return patchedEntry;
     });
 }
 
@@ -581,7 +607,6 @@ function patchSwz(sourceSwzPath, targetSwzPath, translations, missions, verifyOn
                 ? patchTooltipTypes(entry.xml, stats)
                 : patchGenericXml(entry.xml, entry.rootName, translations, stats)
     }));
-
     if (!verifyOnly) {
         fs.writeFileSync(targetSwzPath, encodeSwz(decoded.initialKey, entries));
     }

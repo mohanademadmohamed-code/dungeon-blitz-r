@@ -17,6 +17,7 @@ import {
     buildDungeonBlitzSwfVariantBuffer,
     buildPortugueseAssetSwfBuffer,
     buildPortugueseExactAssetSwfBuffer,
+    buildPortugueseLevelsBtSwfBuffer,
     buildPortugueseLevelsNrSwfBuffer,
     buildPortugueseUi1SwfBuffer,
     buildPortugueseUi4SwfBuffer,
@@ -90,8 +91,8 @@ export class StaticServer {
     private selectedSwfCache: { key: string; buffer: Buffer } | null;
     private localizedAssetSwfCache: { key: string; buffer: Buffer } | null;
     private readonly discordAccountLinks: DiscordAccountLinkService;
-    private readonly flashVersion = 'cdb';
-    private readonly gameVersion = 'cdb';
+    private readonly flashVersion = 'cdl';
+    private readonly gameVersion = 'cdl';
 
     constructor(
         port: number = Config.STATIC_PORT,
@@ -122,7 +123,8 @@ export class StaticServer {
         const stats = fs.statSync(swfPath);
         const ptbrMainText = process.env.DB_PTBR_MAIN_SWF_TEXT === '1' ? 'on' : 'off';
         const ptbrEmotePatches = process.env.DB_PTBR_EMOTE_PATCHES === '0' ? 'off' : 'on';
-        const cacheKey = `${mode}:${locale}:${ptbrMainText}:${ptbrEmotePatches}:${SWF_RUNTIME_VERSION}:${swfPath}:${stats.mtimeMs}:${stats.size}`;
+        const ptbrBytecodePatches = process.env.DB_PTBR_MAIN_SWF_BYTECODE_PATCHES === '0' ? 'off' : 'on';
+        const cacheKey = `${mode}:${locale}:${ptbrMainText}:${ptbrEmotePatches}:${ptbrBytecodePatches}:${SWF_RUNTIME_VERSION}:${swfPath}:${stats.mtimeMs}:${stats.size}`;
         if (this.selectedSwfCache?.key === cacheKey) {
             return this.selectedSwfCache.buffer;
         }
@@ -130,7 +132,7 @@ export class StaticServer {
         const buffer = buildDungeonBlitzSwfVariantBuffer(swfPath, mode, locale);
         this.selectedSwfCache = { key: cacheKey, buffer };
         const ptbrFlags = locale === 'pt-br'
-            ? ` ptbrMainText=${ptbrMainText} ptbrEmotePatches=${ptbrEmotePatches}`
+            ? ` ptbrMainText=${ptbrMainText} ptbrEmotePatches=${ptbrEmotePatches} ptbrBytecodePatches=${ptbrBytecodePatches}`
             : '';
         console.log(`[StaticServer] Prepared DungeonBlitz.swf variant for ${mode} mode (${locale}).${ptbrFlags}`);
         return buffer;
@@ -178,7 +180,7 @@ export class StaticServer {
                 buffer = buildPortugueseAssetSwfBuffer(swfPath, BRAZILIAN_PORTUGUESE_LEVELS_SRN_REPLACEMENTS);
                 console.log(`[StaticServer] Served ${assetRelativePath} for pt-br with localizedAssets=on (BRM exact strings patched).`);
             } else if (assetName === 'levelsbt.swf') {
-                buffer = buildPortugueseExactAssetSwfBuffer(swfPath, BRAZILIAN_PORTUGUESE_LEVELS_BT_REPLACEMENTS);
+                buffer = buildPortugueseLevelsBtSwfBuffer(swfPath);
                 console.log(`[StaticServer] Served ${assetRelativePath} for pt-br with localizedAssets=on (Felbridge exact strings patched).`);
             } else if (assetName === 'levelsch.swf') {
                 buffer = buildPortugueseExactAssetSwfBuffer(swfPath, BRAZILIAN_PORTUGUESE_LEVELS_CH_REPLACEMENTS);
@@ -291,6 +293,33 @@ export class StaticServer {
 
             try {
                 return this.normalizeLocale(decodeURIComponent(entry.slice(separatorIndex + 1).trim()));
+            } catch (_error) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private resolveCookiePlayerGender(req: Request): string | null {
+        const cookieHeader = req.headers.cookie;
+        if (typeof cookieHeader !== 'string' || !cookieHeader.trim()) {
+            return null;
+        }
+
+        for (const entry of cookieHeader.split(';')) {
+            const separatorIndex = entry.indexOf('=');
+            if (separatorIndex === -1) {
+                continue;
+            }
+
+            const name = entry.slice(0, separatorIndex).trim();
+            if (name !== 'db_gender') {
+                continue;
+            }
+
+            try {
+                return this.normalizePlayerGender(decodeURIComponent(entry.slice(separatorIndex + 1).trim()));
             } catch (_error) {
                 return null;
             }
@@ -413,7 +442,8 @@ export class StaticServer {
             this.resolveQueryPlayerGender(req) ??
             this.resolveReferrerPlayerGender(req) ??
             this.resolveSessionPlayerGender(req) ??
-            this.resolveLocalFallbackPlayerGender()
+            this.resolveLocalFallbackPlayerGender() ??
+            this.resolveCookiePlayerGender(req)
         );
     }
 
@@ -558,16 +588,15 @@ export class StaticServer {
             return null;
         }
 
-        const playerGender = this.resolveGameSwzPlayerGender(req);
-        if (!playerGender) {
-            return null;
-        }
+        const playerGender = this.resolveGameSwzPlayerGender(req) ?? 'male';
 
         const swzPath = this.getGameSwzPathForLocale(locale);
         const decoded = this.decodeSwz(fs.readFileSync(swzPath));
         const entries = decoded.entries.map((entry) => ({
             ...entry,
-            xml: this.localizePortugueseSwzTextNodesForGender(entry.xml, playerGender)
+            xml: entry.rootName === 'MissionTypes'
+                ? this.localizePortugueseSwzTextNodesForGender(entry.xml, playerGender)
+                : entry.xml
         }));
         return this.encodeSwz(decoded.initialKey, entries);
     }
@@ -614,13 +643,6 @@ export class StaticServer {
             for (const [oldValue, newValue] of BRAZILIAN_PORTUGUESE_LEVEL_TYPES_XML_REPLACEMENTS) {
                 localized = localized.replace(oldValue, newValue);
             }
-        } else if (basename === 'missiontypes.xml') {
-            // In the original flow this thought belongs to the Mausoleum post-boss
-            // sequence. PT-BR appends it there, so suppress the later accept trigger.
-            localized = localized.replace(
-                /^\s*<ISayOnAccept>\^tI need to seal off the wisps<\/ISayOnAccept>\s*$/gm,
-                ''
-            );
         }
 
         return Buffer.from(localized, 'utf8');
@@ -633,6 +655,20 @@ export class StaticServer {
         }
 
         res.cookie('db_lang', locale, {
+            httpOnly: false,
+            maxAge: 365 * 24 * 60 * 60 * 1000,
+            sameSite: 'lax',
+            path: '/'
+        });
+    }
+
+    private rememberRequestGender(req: Request, res: Response): void {
+        const gender = this.resolveQueryPlayerGender(req) ?? this.resolveReferrerPlayerGender(req);
+        if (!gender) {
+            return;
+        }
+
+        res.cookie('db_gender', gender, {
             httpOnly: false,
             maxAge: 365 * 24 * 60 * 60 * 1000,
             sameSite: 'lax',
@@ -724,6 +760,7 @@ export class StaticServer {
 
             const locale = this.resolveSwfLocale(req);
             this.rememberQueryLocale(req, res);
+            this.rememberRequestGender(req, res);
             res.type('application/x-shockwave-flash');
             res.setHeader('X-DungeonBlitz-Language', locale);
             res.send(this.getSelectedSwfBuffer(locale));
@@ -732,6 +769,7 @@ export class StaticServer {
         this.app.get('/p/cbq/Game.swz', (req, res) => {
             const locale = this.resolveGameSwzLocale(req);
             this.rememberQueryLocale(req, res);
+            this.rememberRequestGender(req, res);
             const genderResolvedSwz = this.getGameSwzBufferForRequest(req, locale);
             res.type('application/x-shockwave-flash');
             res.setHeader('X-DungeonBlitz-Language', locale);
@@ -747,6 +785,8 @@ export class StaticServer {
 
         this.app.get('/p/:assetVersion/Game.swz', (req, res) => {
             const locale = this.resolveGameSwzLocale(req);
+            this.rememberQueryLocale(req, res);
+            this.rememberRequestGender(req, res);
             const genderResolvedSwz = this.getGameSwzBufferForRequest(req, locale);
             res.type('application/x-shockwave-flash');
             res.setHeader('X-DungeonBlitz-Language', locale);

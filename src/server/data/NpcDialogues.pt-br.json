@@ -3,249 +3,253 @@
     "BridgeTown": {
       "btgreeter": {
         "defaultLines": [
-          "Por Favor ir volta e obter livrar de Arachnae",
-          "Segurar la, stanger. Quem sao voce?",
-          "Voce fez alguns tremendous changes em estes parts.",
-          "Nos Estamos sabio para seu de tipo tricks. Present voce mesmo para Guardiao ou taste steel.",
-          "Guardiao deve aprovar todos forasteiros.",
-          "e so sao voce, aquele nao significa nos estamos amigos.",
-          "Eu era nascido aqui.",
-          "Nao saber nada sobre nenhum hordas.",
-          "Voce tambem verificar em com Guardiao ou afastado com voce.",
-          "Embora Guardiao vai nenhum duvida enviar voce em seu caminho.",
-          "Nos Estamos nao procurando para seu tipo de problema."
+          "Por favor, volte e livre-se de Arachnae.",
+          "Alto lá, forasteiro|forasteira. Quem é você?",
+          "Você fez mudanças incríveis por essas bandas.",
+          "Conhecemos bem os truques da sua laia. Se apresente ao Guardião ou sentirá o gosto do aço.",
+          "O Guardião precisa aprovar todos os forasteiros.",
+          "Você também, mas isso não significa que sejamos amigos.",
+          "Eu nasci aqui.",
+          "Não sei nada sobre horda nenhuma.",
+          "Ou você se apresenta ao Guardião, ou dá o fora.",
+          "Embora o Guardião sem dúvida vá mandar você embora.",
+          "Não queremos esse tipo de problema."
         ]
       },
       "btmayor01": {
         "defaultLines": [
-          "Oh, glorious deuses! Apenas o que nos nao precisa, mais forasteiros...",
-          "Bem, estranho, Eu Estou surpreso. Voce feito nosso fair vila um servico.",
-          "bandidos dizer eles estao soldados de seu terra natal.",
-          "Voce afirmar para ser de alguns kingdom atraves mar.",
-          "Eu nao saber qualquer reis, mas estes outro homens disse mesmo.",
-          "Nenhum, nenhum, nos estamos fazendo apenas fine.",
-          "Exceto para saqueadores e saqueadores de atraves mar.",
-          "Apparently de seu kingdom.",
-          "Qual Eu Vou answer uma vez voce tomar cuidar de seu companheiro bandidos.",
-          "Bem, eles sao, e eles estao de seu terra.",
-          "Voce retornou? So talvez voce nao sao como outros.",
-          "Eu enviou seu amigos de de Wolf Fim para Cemiterio Colina. Eles pode assentar la se eles como.",
-          "Ha nenhum sala para voce de Wolf Fim folk aqui.",
-          "Meu povo settled aqui 40 anos atras.",
-          "Nos veio de um distante, distante terra, onde nos eram escravos.",
-          "Agora nos viver gratis e prosperous vidas.",
-          "Nos proteger nosso proprio.",
-          "Eu enviou seu amigos de de Wolf Fim para Cemiterio Colina.",
-          "Se eles estao procurando para novo terras para assentar, eles pode tem aqueles.",
-          "Beggars nao pode ser choosers."
-        ]
+          "Era só o que me faltava! Justo o que não precisávamos, mais forasteiros...",
+          "Muito bem, forasteiro|forasteira, estou surpreso. Você prestou um grande serviço à nossa bela cidade.",
+          "Os bandidos dizem que são soldados da sua terra natal.",
+          "Você diz ser de algum reino do outro lado do mar.",
+          "Não conheço nenhum rei, mas esses outros homens disseram o mesmo.",
+          "Não, não, estamos bem.",
+          "Exceto por saqueadores e invasores vindos do outro lado do mar.",
+          "Aparentemente, do seu reino.",
+          "Eu as responderei assim que você cuidar dos seus companheiros bandidos.",
+          "Que seja, mas eles são, e são da sua terra.",
+          "Você voltou? Então, talvez você não seja como os outros.",
+          "Enviei seus amigos de Fim do Lobo para a Colina do Cemitério. Eles podem se estabelecer lá, se quiserem.",
+          "Aqui não há lugar para vocês, gente de Fim do Lobo.",
+          "Meu povo se estabeleceu aqui há 40 anos.",
+          "Viemos de uma terra muito, muito distante, onde éramos escravos.",
+          "Mas hoje vivemos uma vida livre e próspera.",
+          "Nós protegemos os nossos.",
+          "Enviei seus amigos de Fim do Lobo para a Colina do Cemitério.",
+          "Se eles estão procurando novas terras para se estabelecerem, podem ficar com elas.",
+          "Quem não tem escolha não pode ser exigente."
+        ],
+        "displayName": "Intendente de Felbridge"
       },
       "btmerchant01": {
-        "displayName": "Descricao em Portugues D91CF8.",
+        "displayName": "Hector",
         "defaultLines": [
-          "Nenhum um mais vai comercio com Gnoles.",
-          "Mas Eu lembrar quando eles nao eram so ruim.",
-          "Eu nao pode imagine por que eles estao so irado agora!"
+          "Ninguém mais vai negociar com os Gnoles.",
+          "Mas eu me lembro de quando eles não eram tão ruins assim.",
+          "Não consigo imaginar por que estão tão bravos agora!"
         ]
       },
       "btsubwarden": {
         "defaultLines": [
-          "bandido acampamento era apenas volta outro caminho",
-          "Estes bandidos nunca bothered nos antes. Fez voce rile eles acima?",
-          "Mordomo foi para dentro aquele caverna para preparar para Colheita Ritual.",
-          "Voce nao deveria perturbar Mordomo.",
-          "Eu acho so.",
-          "Apenas Mordomo sabe como isso funciona.",
-          "Mordomo tem longo protegido nosso povo, sempre desde nos veio aqui.",
-          "Bem, ele esta em la.",
-          "Mas nao bother ele se ele parece tambem ocupado.",
-          "Ele Esta fazendo importante trabalho."
-        ]
+          "O acampamento dos bandidos ficava logo ali, na direção oposta.",
+          "Esses bandidos nunca nos incomodaram antes. Foi você quem provocou eles?",
+          "O Intendente entrou naquela caverna para se preparar para o Ritual da Colheita.",
+          "Não se deve incomodar o Intendente.",
+          "Acho que sim.",
+          "Só o Intendente sabe como isso funciona.",
+          "O Intendente protege nosso povo há muito tempo, desde que chegamos aqui.",
+          "Bom, ele está lá dentro.",
+          "Mas não o incomode se ele parecer muito ocupado.",
+          "Ele está fazendo um trabalho importante."
+        ],
+        "displayName": "Guarda Gunter"
       },
       "bttrainer01": {
-        "displayName": "Descricao em Portugues 4AF7A7.",
+        "displayName": "Kellah",
         "defaultLines": [
-          "Tempo para um lesson?"
+          "Hora de uma aula?"
         ]
       },
       "btwarden": {
         "defaultLines": [
-          "Por Favor ir volta e obter livrar de Arachnae",
-          "Voce Esta um melhor class de herói",
-          "Um nos precisa badly",
-          "morto de Cemiterio Colina sao levantando",
-          "Bandidos ainda atormentar nos",
-          "e nos viver em sombra de Castelo Hocke",
-          "Aquele fortress era shut para nos anos atras",
-          "Mas mal aquele shut isso ainda pervades este terra",
-          "Tem voce visto Mordomo ainda.",
-          "Voce mudou este terra para melhor.",
-          "Mas Eu medo nosso troubles tem apenas comecou.",
-          "Nos tinha nosso encher de saqueadores e bandidos.",
-          "Voce behave, estranho.",
-          "Estranho, Eu saber seu type. Nos nenhum patience para voce aqui.",
-          "Eu nao saber voce, mas voce iria melhor ser em seu caminho.",
-          "Seu rei tem nada para fazer com nos.",
-          "e nos tinha plenty de bandidos dizer mesmo historia.",
-          "Eu nao querer problema, so ir onto bosques com outros.",
-          "Sim, voce vai encontrar plenty de seu tipo la.",
-          "So voce dizer.",
-          "Eu Vou acredito isso quando Eu ver isso.",
-          "Mordomo nao e aqui certo agora, estranho.",
-          "Voce Esta volta.",
-          "Apenas Mordomo sabe como magico escudo funciona.",
-          "Aquele escudo e nosso principal protecao contra nosso inimigos.",
-          "Eu nao saber, isso e dele fazendo.",
-          "Mas ele esta manteve nos principalmente seguro para anos.",
-          "Um poucos povo disappear cada ano, mas nao muito.",
-          "Mordomo e gathering material para Colheita Ritual.",
-          "Ir falar para dele guarda-costas Gunter se voce querer para encontrar ele.",
-          "Voce dizer Mordomo adora sombrio poderes?",
-          "Eu tinha nenhum ideia!",
-          "Direita ha la, afastado vila square.",
-          "Pressa, voce tem para encontrar fora quem mais e helping ele.",
-          "Mordomo, fazendo pacts com mal deuses...",
-          "Eu nunca imaginou isso.",
-          "Com de mordomo mal unveiled, nos tem um muito para figure fora.",
-          "Segundo para de mordomo diario, dele culto tomou sacrificios para montanha pico.",
-          "Ha um chance Culto deixou sobreviventes em montanha.",
-          "Eu Estou enviando alguns de meu povo para investigar.",
-          "Entao encontrar meu povo em montanhas.",
-          "Mas tread lightly, nos nao saber o que e acima la.",
-          "Voce retornou uma vez novamente. Whatever voce fez fora la, isso esta feito algo aqui.",
-          "Agradecer voce para tudo voce tem feito aqui!",
-          "Por destroying Meylour, voce deixou caminho para Adormecido Terras unblocked.",
-          "Com de Meylour barreira sumiram, caminho para castelo e abrir.",
-          "Meu povo veio acima de la decadas atras.",
-          "Nos eram fleeing um vida de escravidao em Adormecido Terras.",
-          "Dragoes e Goblins manteve nos em correntes.",
-          "Ha nenhum sabendo o que e la agora.",
-          "de Meylour barreira manteve Adormecido Terras bloqueado embora de este mundo.",
-          "magia barreira aquele selado Castelo Hocke e dispelled."
-        ]
+          "Por favor, volte e livre-se de Arachnae.",
+          "Você é um herói de outro nível.",
+          "Um de que precisamos muito.",
+          "Os mortos da Colina do Cemitério estão se erguendo.",
+          "Os bandidos ainda nos atormentam.",
+          "E vivemos à sombra do Castelo Hocke.",
+          "Aquela fortaleza está fechada para nós há anos.",
+          "Mas o mal que a fechou ainda assola essa terra.",
+          "Você viu o Intendente?",
+          "Você mudou essa terra para melhor.",
+          "Mas temo que nossos problemas estejam apenas começando.",
+          "Já tivemos nossa cota de saqueadores e bandidos.",
+          "Comporte-se, forasteiro|forasteira.",
+          "Forasteiro|Forasteira, conheço bem o seu tipo. Aqui não temos paciência para gente assim.",
+          "Não te conheço, mas é melhor você dar o fora.",
+          "Seu rei não tem nada a ver conosco.",
+          "E já ouvimos muitos bandidos contarem a mesma história.",
+          "Não quero problemas, então vai para a floresta com os outros.",
+          "Sim, você vai encontrar muitos da sua laia por lá.",
+          "É o que você diz.",
+          "Só acredito vendo.",
+          "O Intendente não está aqui agora, forasteiro|forasteira.",
+          "Você voltou.",
+          "Só o Intendente sabe como o escudo mágico funciona.",
+          "Esse escudo é a nossa principal proteção contra os inimigos.",
+          "Não sei, isso é coisa dele.",
+          "Mas ele nos manteve em segurança na maior parte do tempo durante anos.",
+          "Algumas pessoas desaparecem todos os anos, mas não são muitas.",
+          "O Intendente está reunindo materiais para o Ritual da Colheita.",
+          "Fale com o guarda-costas dele, Gunter, se quiser encontrá-lo.",
+          "Você está dizendo que o Intendente venera forças das trevas?",
+          "Eu não fazia a menor ideia!",
+          "Bem ali, perto da praça da cidade.",
+          "Depressa, você precisa descobrir quem mais está ajudando ele.",
+          "O Intendente, fazendo pactos com deuses malignos...",
+          "Eu nunca imaginei isso.",
+          "Agora que a maldade do Intendente foi revelada, temos muito o que descobrir.",
+          "De acordo com o diário do Intendente, seu culto levava vítimas para o topo da montanha.",
+          "É possível que o Culto tenha deixado sobreviventes na montanha.",
+          "Vou enviar alguns dos meus homens para investigar.",
+          "Então, encontre meu povo nas montanhas.",
+          "Mas tenha cuidado, não sabemos o que há lá em cima.",
+          "Você voltou mais uma vez. Seja lá o que você tenha feito lá fora, isso teve um efeito aqui.",
+          "Obrigado por tudo que você fez aqui!",
+          "Ao destruir Meylour, você deixou livre o caminho para as Terras Adormecidas.",
+          "Com a barreira de Meylour desfeita, o caminho para o castelo está aberto.",
+          "Meu povo veio de lá décadas atrás.",
+          "Estávamos fugindo de uma vida de escravidão nas Terras Adormecidas.",
+          "Os Dragões e os Goblins nos mantinham acorrentados.",
+          "Não dá para saber o que existe lá agora.",
+          "A barreira de Meylour manteve as Terras Adormecidas isoladas deste mundo.",
+          "A barreira mágica que selava o Castelo Hocke foi dissipada."
+        ],
+        "displayName": "Guardião Maximilian"
       },
       "earl": {
-        "displayName": "Descricao em Portugues 22FEFB.",
+        "displayName": "Earl",
         "defaultLines": [
-          "Outro estranho...",
-          "Nos nenhum sala para estranhos aqui.",
-          "Nenhum de seu concern, estranho."
+          "Mais um|uma forasteiro|forasteira...",
+          "Não temos espaço para forasteiros aqui.",
+          "Isso não é da sua conta, forasteiro|forasteira."
         ]
       },
       "emma": {
-        "displayName": "Descricao em Portugues 409AE7.",
+        "displayName": "Emma",
         "defaultLines": [
-          "La sao povo vivendo sul de pantano?",
-          "Incrivel, Eu nao mesmo saber la eram outro humanos.",
-          "Eu grew acima aqui.",
-          "Isso Esta melhor lugar em mundo."
+          "Há pessoas morando ao sul do pântano?",
+          "Que incrível, eu nem sabia que existiam outras pessoas.",
+          "Eu cresci aqui.",
+          "É o melhor lugar do mundo."
         ]
       },
       "felguard": {
-        "displayName": "Descricao em Portugues B2611F.",
+        "displayName": "Felguard",
         "defaultLines": [
-          "bosques sao cheio de bandidos.",
-          "Mas eles iriam nunca vir aqui."
+          "A floresta está cheia de bandidos.",
+          "Mas eles nunca viriam até aqui."
         ]
       },
       "franny": {
-        "displayName": "Descricao em Portugues FE14F7.",
+        "displayName": "Franny",
         "defaultLines": [
-          "Aqui para colheita festival?",
-          "Mordomo faz certo cada ano e melhor que ultimo.",
-          "Aquele homem funciona maravilhas.",
-          "Nao mesmo saber por que nos precisa um Guardiao."
+          "Veio para o festival da colheita?",
+          "O Intendente garante que cada ano seja melhor que o anterior.",
+          "Aquele homem faz maravilhas.",
+          "Nem sei por que precisamos de um Guardião."
         ]
       },
       "grahm": {
-        "displayName": "Descricao em Portugues F1C22F.",
+        "displayName": "Grahm",
         "defaultLines": [
-          "Gnoles nunca vir para dentro vila.",
-          "Mas eles vao ataque se voce sair cidade limita."
+          "Os Gnoles nunca vêm à cidade.",
+          "Mas eles vão atacar se você sair dos limites da cidade."
         ]
       },
       "jema": {
-        "displayName": "Descricao em Portugues FB59D9.",
+        "displayName": "Jema",
         "defaultLines": [
-          "Um forasteiro! Uau!",
-          "Eu wish meu irmao Karl eram aqui.",
-          "Ele ran embora ultimo colheita.",
-          "Mas ele sempre disse la eram outro povo.",
-          "e ele era certo.",
-          "Acho Mordomo nao saber todos."
+          "Um|Uma forasteiro|forasteira! Uau!",
+          "Queria que meu irmão Karl estivesse aqui.",
+          "Ele fugiu na última colheita.",
+          "Mas ele sempre dizia que havia outras pessoas.",
+          "E ele estava certo.",
+          "Parece que o Intendente não sabe de tudo."
         ]
       },
       "laura": {
-        "displayName": "Descricao em Portugues 6A3FB3.",
+        "displayName": "Laura",
         "defaultLines": [
-          "Quem sao voce?",
-          "Eu Ja nunca visto alguem de fora vila.",
-          "Sao voce allowed para ser aqui?"
+          "Quem é você?",
+          "Nunca vi ninguém de fora da cidade.",
+          "Você tem permissão para estar aqui?"
         ]
       },
       "lucy": {
-        "displayName": "Descricao em Portugues C5C8F3.",
+        "displayName": "Lucy",
         "defaultLines": [
-          "Gnoles e bandidos fora la.",
-          "Ficar alert."
+          "Há gnoles e bandidos por aí.",
+          "Fique atento|atenta."
         ]
       },
       "meylourmagenpc": {
-        "displayName": "Descricao em Portugues D866E6.",
+        "displayName": "Ilvia",
         "defaultLines": [
-          "Estranho.",
-          "O Que sao voce selling?",
-          "Protecao services?",
-          "Descricao em Portugues 3E1593.",
-          "Magia beans?",
-          "Nos tinha nosso encher de estranhos."
+          "Forasteiro|Forasteira.",
+          "O que você está vendendo?",
+          "Serviços de proteção?",
+          "Remédios comprovados?",
+          "Feijões mágicos?",
+          "Já tivemos nossa cota de forasteiros."
         ]
       },
       "meylourmagenpc2": {
-        "displayName": "Descricao em Portugues 2C7A46.",
+        "displayName": "Savva",
         "defaultLines": [
-          "Deixar me acho...",
-          "Voce Esta um thief?",
-          "Ou talvez um charlatan?",
-          "Eu saber!",
-          "Voce Esta um#tc#.",
-          "Mesmo pior."
+          "Deixe-me adivinhar...",
+          "Você é ladrão|ladra?",
+          "Ou talvez charlatão|charlatã?",
+          "Eu sei!",
+          "Você é #tc#.",
+          "Ainda pior."
         ]
       },
       "npctraveller": {
-        "displayName": "Descricao em Portugues 68A748.",
+        "displayName": "Bella Sagesword",
+        "scriptedText": "Cuidado! Acha que eu restaurei o Portão Dreadfold para você tropeçar até sua ruína?=@Imagino que não?=Muito tempo atrás, o mago Caphrax dividiu o mundo em dois rios do tempo.=Os dois ramos estão próximos, mas separados.=Em um dos ramos, o mago canalizou a magia terrível das Terras Adormecidas, criando o Dreadfold.=@Ooooh=Sim, um reflexo sombrio e repleto de magia do nosso mundo se encontra do outro lado desse portal.=@Posso dar uma olhada?=Você enlouqueceu? Só um grupo de aventureiros experientes tem alguma chance de passar por aquele portão.=@Então, não?=Sugiro que você domine primeiro os perigos desse mundo.",
         "defaultLines": [
-          "Tem um cuidar! Fez Eu restaurar Dreadfold Portao so voce poderia stumble para seu ruina?",
-          "Longo atras, wizard Caphrax sundered mundo para dentro dois tempo-rivers",
-          "dois branches sao perto mas separated",
-          "Para Dentro um branch wizard channeled sombrio magia de Adormecido Terras, creating Dreadfold",
-          "Sim, um sombrio, magia-drenched mirror de nosso mundo mentiras atraves este portao",
-          "Sao voce louco? Apenas um batalha-experiente equipe de aventureiros fica qualquer chance atraves aquele portao",
-          "Eu Iria suggest voce mestre perils de este mundo primeiro"
+          "Cuidado! Acha que eu restaurei o Portão Dreadfold para você tropeçar até sua ruína?",
+          "Muito tempo atrás, o mago Caphrax dividiu o mundo em dois rios do tempo.",
+          "Os dois ramos estão próximos, mas separados.",
+          "Em um dos ramos, o mago canalizou a magia terrível das Terras Adormecidas, criando o Dreadfold.",
+          "Sim, um reflexo sombrio e repleto de magia do nosso mundo se encontra do outro lado desse portal.",
+          "Você enlouqueceu? Só um grupo de aventureiros experientes tem alguma chance de passar por aquele portão.",
+          "Sugiro que você domine primeiro os perigos desse mundo."
         ]
       },
       "rodgert": {
-        "displayName": "Descricao em Portugues 9CB5F1.",
+        "displayName": "Rodgert",
         "defaultLines": [
-          "Nosso colheita festival begins logo!",
-          "Isso Esta meu favorite tempo de ano.",
-          "Embora algo sad sempre happens tambem.",
-          "Meu nephew disappeared ultimo festival.",
-          "Meu daughter disappeared dez anos volta.",
-          "Ainda, isso esta um happy tempo!"
+          "Nosso festival da colheita começa em breve!",
+          "É minha época favorita do ano.",
+          "Embora algo triste sempre aconteça também.",
+          "Meu sobrinho desapareceu no último festival.",
+          "Minha filha desapareceu dez anos atrás.",
+          "Mesmo assim, é uma época feliz!"
         ]
       },
       "samuel": {
-        "displayName": "Descricao em Portugues F84B9D.",
+        "displayName": "Samuel",
         "defaultLines": [
-          "Ponte Sombria e um bom lugar.",
-          "Nos nao precisa forasteiros messing coisas acima."
+          "Felbridge é um bom lugar.",
+          "Não precisamos de forasteiros estragando tudo."
         ]
       },
       "smiddy": {
-        "displayName": "Descricao em Portugues DEE530.",
+        "displayName": "Smiddy",
         "defaultLines": [
-          "*grumble*%Lotta trabalho para fazer%*mumble*%*grumble* Move along, kido.%Nao makin' qualquer coisa fancy. Apenas um shovel.%*mumble grumble*%^tNosy#tc#'s!"
+          "*resmungo*%Muito trabalho pela frente%*murmúrio*%*resmungo* Dá o fora daqui, garoto|garota.%Não estou fazendo nada especial. Só uma pá.%*murmúrio resmungo*%^t#tc# intrometido|intrometida!"
         ]
       }
     },
@@ -275,8 +279,8 @@
           "Nenhum, nenhum, nos estamos fazendo apenas fine.",
           "Exceto para saqueadores e saqueadores de atraves mar.",
           "Apparently de seu kingdom.",
-          "Qual Eu Vou answer uma vez voce tomar cuidar de seu companheiro bandidos.",
-          "Bem, eles sao, e eles estao de seu terra.",
+          "Eu as responderei assim que você cuidar dos seus companheiros bandidos.",
+          "Que seja, mas eles são, e são da sua terra.",
           "Voce retornou? So talvez voce nao sao como outros.",
           "Eu enviou seu amigos de de Wolf Fim para Cemiterio Colina. Eles pode assentar la se eles como.",
           "Ha nenhum sala para voce de Wolf Fim folk aqui.",
@@ -309,7 +313,8 @@
           "Bem, ele esta em la.",
           "Mas nao bother ele se ele parece tambem ocupado.",
           "Ele Esta fazendo importante trabalho."
-        ]
+        ],
+        "displayName": "Guarda Gunter"
       },
       "bttrainer01hard": {
         "displayName": "Descricao em Portugues 4AF7A7.",
@@ -750,7 +755,7 @@
       },
       "egscout01": {
         "defaultLines": [
-          "de Meylour segredos sao em Estilhaco da Tempestade Montanha.",
+          "Os segredos de Meylour estão nas Montanhas Stormshard.",
           "Voce deve ser um poderosos herói para tem vir atraves minas!",
           "Agradecer voce para reuniting nosso povo!",
           "de Meylour Cinzento Driades sao cercando Ur-Arvore!",
@@ -1893,7 +1898,7 @@
       },
       "ommscout01": {
         "defaultLines": [
-          "Estilhaco da Tempestade Montanhas sao tambem perigoso para ir mais longe acima",
+          "As Montanhas Stormshard são perigosas demais para subir mais",
           "expedicao e acima adiante.",
           "Ser cuidadoso, la sao goblins por toda parte.",
           "La sao goblins de sobra em proximo cavernas.",
@@ -2026,7 +2031,7 @@
       },
       "ommscout01hard": {
         "defaultLines": [
-          "Estilhaco da Tempestade Montanhas sao tambem perigoso para ir mais longe acima",
+          "As Montanhas Stormshard são perigosas demais para subir mais",
           "descanso de expedicao e futher acima montanha.",
           "Ser cuidadoso, la sao goblins por toda parte.",
           "La sao goblins de sobra em proximo cavernas.",
@@ -3007,7 +3012,7 @@
         "displayName": "Sara",
         "defaultLines": [
           "Minha irmã falou bastante de você.",
-          "Você é um|uma caçador|caçadora de goblins implacável."
+          "Você é um caçador|caçadora de goblins implacável."
         ]
       },
       "srntrainer03": {
@@ -3045,252 +3050,252 @@
       "bedehard": {
         "displayName": "Descricao em Portugues FF9E52.",
         "defaultLines": [
-          "Aquele usado para ser estrada para Ponte Sombria",
-          "Agora isso esta estrada para certain morte",
-          "Eu esperanca voce pode limpar caminho"
+          "Aquela costumava ser a estrada para Felbridge.",
+          "Agora é o caminho para a morte certa.",
+          "Espero que você consiga abrir caminho."
         ]
       },
       "danehard": {
         "defaultLines": [
-          "castelo de Lorde Yornak parece ainda habitado embora nao por homens.",
-          "Castelo Yornak era lar de este de regiao lords.",
-          "ultimo Lorde e Dama Yornak construiu magnifico celeiro, palacio, e universidade.",
-          "de Fato eles eram, mas...",
-          "Eles sempre manteve deles antigo castelo em bom reparar.",
-          "Isso era deles seguro retreat.",
-          "Ha alguem em la.",
-          "Alguem Tuatara chamam Yornak.",
-          "Voce sobreviveu Castelo Yornak.",
-          "Yornak familia e outro tragico conto."
+          "O castelo do Lorde Yornak parece ainda estar habitado, embora não por humanos.",
+          "O Castelo Yornak era o lar dos lordes desta região.",
+          "Os últimos Lorde e Dama Yornak construíram o magnífico celeiro, o palácio e a universidade.",
+          "É verdade, mas…",
+          "Eles sempre mantiveram seu antigo castelo em bom estado.",
+          "Era o refúgio seguro deles.",
+          "Tem alguém lá dentro.",
+          "Alguém que os Tuatara chamam de Yornak.",
+          "Você sobreviveu ao Castelo Yornak.",
+          "A família Yornak é mais uma história trágica."
         ]
       },
       "granhard": {
         "defaultLines": [
-          "Vai voce ajudar nos empurrar volta Tuatara soldados?",
-          "Trazer me Elmos de Tuatara Commanders.",
-          "Primeiro, para mostrar eles nos estamos tomando ha. Eles amam deles elmos.",
-          "Segundo, nos pode uso metal para forja nosso proprio armadura.",
-          "Descricao em Portugues DE04E0.",
-          "Agradecer voce! Aqueles lagartos saber nos estamos nao fooling ao redor agora!",
-          "Um real herói em nosso lado!",
-          "Talvez nos pode tomar lutar para estes beasties.",
-          "e nao apenas Tuatara.",
-          "Imagine este terra gratis de monstro dominio!"
+          "Você nos ajudaria a repelir os soldados Tuatara?",
+          "Traga-me os elmos dos Comandantes Tuatara.",
+          "Primeiro, para mostrar a eles que estamos assumindo o comando. Eles adoram seus elmos.",
+          "E segundo, podemos usar o metal para forjar nossa própria armadura.",
+          "Bingo! Exatamente.",
+          "Obrigado! Agora esses lagartos sabem que não estamos brincando!",
+          "É bom ter um|uma verdadeiro|verdadeira herói|heroína ao nosso lado!",
+          "Talvez possamos levar a luta até essas bestas.",
+          "E não só os Tuatara.",
+          "Imagine essa terra livre do domínio dos monstros!"
         ]
       },
       "grettahard": {
         "defaultLines": [
-          "Meu antidoto para aranha veneno precisa aranha presas",
-          "Se voce trazer me aranha presas, Eu Iria ser capaz para fazer um antidoto.",
-          "Estes grande aranhas nao usado para viver aqui.",
-          "Isso e por que Eu odeio magia, sempre corrompendo coisas.",
-          "Eu muito prefer alchemy.",
-          "Agradecer voce, agora Eu pode terminar antidoto",
-          "Isso vai tomar anos para obter livrar de estes aranhas.",
-          "Se nos pode sempre figure fora onde eles vir de."
+          "Meu antídoto contra o veneno de aranha precisa de presas de aranha.",
+          "Se você me trouxer presas de aranha, eu conseguiria preparar um antídoto.",
+          "Essas aranhas grandes não costumavam morar aqui.",
+          "É por isso que eu odeio magia, sempre corrompendo tudo.",
+          "Eu prefiro muito mais a alquimia.",
+          "Obrigada, graças a você agora posso terminar o antídoto.",
+          "Apesar de que vai levar alguns anos para nos livrarmos dessas aranhas.",
+          "Se é que algum dia conseguiremos descobrir de onde elas vêm."
         ]
       },
       "ieldhard": {
         "defaultLines": [
-          "Aqueles lagartos colocar um muito de stock em aqueles estandartes",
-          "Tuatara reunem ao redor deles guerra estandartes.",
-          "Eles Estao ferozes quando deles estandarte e acima.",
-          "estandartes sao encantado em alguns caminho.",
-          "Se voce capture alguns de eles, Eu pode ser capaz para uso deles magia contra eles.",
-          "Perfect. Eu acho Eu pode sew nosso proprio encantado estandartes agora.",
-          "Agora Eu apenas precisa um bom desenho.",
+          "Esses lagartos dão muita importância a esses estandartes.",
+          "Os Tuatara se reúnem em torno de seus estandartes de guerra.",
+          "Eles ficam ferozes quando hasteiam o estandarte.",
+          "Os estandartes estão, de alguma forma, encantados.",
+          "Se você capturar alguns deles, talvez eu consiga usar a magia deles contra eles.",
+          "Perfeito. Acho que agora consigo costurar nossos próprios estandartes encantados.",
+          "Agora só preciso de um bom design.",
           "Hm, obrigado, vou pensar melhor nisso.",
-          "Uh, voce fazer?",
-          "Sim, bem, Eu Vou vir acima com um poucos options."
+          "Ah, é mesmo?",
+          "Sim... Bom, vou pensar em algumas opções."
         ]
       },
       "kenelmhard": {
         "displayName": "Descricao em Portugues 19F492.",
         "defaultLines": [
-          "Isso Esta sombrio abaixo aqui.",
-          "e wet.",
-          "Eu miss praia."
+          "É escuro aqui embaixo.",
+          "E molhado.",
+          "Sinto falta da praia."
         ]
       },
       "odemhard": {
         "defaultLines": [
-          "ruinas de Real Celeiro e fonte de devoradores.",
-          "Real Celeiro usado para ser um maravilha de mundo.",
-          "Mas agora arruinado celeiro e corrompido.",
-          "devoradores parecem para todos vir de la.",
-          "Se nos pode recuperar grain campos, nos pode apoio um inteiro exercito.",
-          "Voce limpou Real Celeiro!",
-          "Estes murderous plantas sao intriguing.",
-          "Nos precisa para aprender mais sobre Devoradores.",
-          "Sim, mas eles crescem como ervas daninhas.",
-          "Se nos estamos indo para curar terra, Eu para saber mais.",
-          "Coletar dentes de grande uns.",
-          "Eu pode uso eles para concoct um potion para veneno eles.",
-          "Bem feito, agradecer voce!",
-          "Eu odeio para acho o que Hsalt fez para dar plantas dentes.",
-          "Isso Esta terrivel para contemplar.",
-          "Mas isso esta todos Eu pode acho sobre.",
-          "O Que mais fez ele dar dentes para?",
+          "As ruínas do Celeiro Real são a origem dos Devoradores.",
+          "O Celeiro Real já foi uma das maravilhas do mundo.",
+          "Mas agora o celeiro está em ruínas e corrompido.",
+          "Parece que todos os Devoradores vêm de lá.",
+          "Se conseguirmos recuperar os campos de grãos, poderemos sustentar um exército inteiro.",
+          "Você limpou o Celeiro Real!",
+          "Essas plantas assassinas são intrigantes.",
+          "Precisamos aprender mais sobre os Devoradores.",
+          "Sim, mas elas crescem como ervas-daninhas.",
+          "Se quisermos recuperar a terra, preciso saber mais.",
+          "Colete os dentes dos maiores.",
+          "Posso usá-los para preparar uma poção e envenená-los.",
+          "Muito bem, obrigado!",
+          "Nem quero imaginar o que o Hsalt fez para dar dentes às plantas.",
+          "É aterrorizante só de imaginar.",
+          "Mas é só nisso que consigo pensar.",
+          "Para o que mais ele deu dentes?",
           "Cogumelos?",
-          "Descricao em Portugues 4D97D8.",
-          "Descricao em Portugues DB7932."
+          "Águas-vivas?",
+          "Pedras?"
         ]
       },
       "palokhard": {
         "defaultLines": [
-          "Um Tuatara squad tem montou acima em um abandonado fazenda.",
-          "lagartos tomou ha este antigo casa.",
-          "Eles Estao usando isso como um base para lancar ataques de.",
-          "Eles loja suprimentos la tambem.",
-          "Principalmente secos besouros e rancida carne.",
-          "So voce pode talvez sair aquele la.",
-          "Unless voce esta para dentro aquele tipo de comida.",
-          "Eu Estou nao judging.",
-          "Agradecer voce!",
-          "Nos Vamos fortaleza um olho em aquele lugar.",
-          "Se qualquer mais mostrar acima, nos vamos tomar cuidar de eles.",
-          "Obrigado para nao bringing me secos besouros.",
-          "Embora meu cousin diz eles estao tasty.",
-          "Eu acho Eu deveria tentar um antes Eu judge."
+          "Um grupo de Tuatara se instalou em uma fazenda abandonada.",
+          "Os lagartos tomaram conta dessa velha casa.",
+          "Estão usando ela como base para lançar ataques.",
+          "Eles também guardam suprimentos lá.",
+          "Principalmente besouros secos e carne rançosa.",
+          "Então, talvez você possa deixar isso lá.",
+          "Bom... a menos que você goste desse tipo de comida.",
+          "Sem julgamentos, claro.",
+          "Obrigado!",
+          "Vamos ficar de olho naquele lugar.",
+          "Se aparecerem mais, nós cuidamos deles.",
+          "Obrigado por não ter me trazido os besouros secos.",
+          "Embora meu primo diga que são gostosos.",
+          "Acho que devo experimentar antes de julgar."
         ]
       },
       "rosehard": {
         "defaultLines": [
-          "Devoradores sao por toda parte! Eu nao pode obter para bem",
-          "Pode voce obter devoradores embora de bem?",
-          "Isso Esta apenas fonte de fresco agua qualquer lugar perto aqui.",
-          "Estes monstro tem corrompido rio.",
-          "e lagoas.",
-          "Eles Iriam corromper chuva se eles poderia.",
-          "Whew, obrigado!",
-          "Obrigado para clearing bem.",
-          "Nos realmente precisa um reliable agua fonte."
+          "Os Devoradores estão por toda parte! Não consigo chegar ao poço.",
+          "Você consegue afastar os devoradores do poço?",
+          "É a única fonte de água potável nas redondezas.",
+          "Esses monstros corromperam o rio.",
+          "E os lagos também.",
+          "Corromperiam até a chuva se pudessem.",
+          "Ufa, obrigada!",
+          "Obrigada por limpar o poço.",
+          "Precisamos urgentemente de uma fonte de água confiável."
         ]
       },
       "srnmayor01hard": {
         "defaultLines": [
-          "Alguns novo tipo de monstruoso guerreiro fica contra nos agora.",
-          "Estes nao sao goblins nos estamos lutando.",
-          "Alguns tipo de reptil-homens. Eles chamam eles mesmos Tuatara.",
-          "Aquele soa como eles, eles estao muito organizard.",
-          "Eles Tem tomado ha um torre proximo.",
-          "Nos nao pode obter passado eles.",
-          "Eu esperanca so.",
-          "Voce mostrou Tuatara como humanos lutar!",
-          "Ranger Affric tem liderou um grupo para scout antigo universidade distrito.",
-          "Affric acha fonte de corrupcao e para leste.",
-          "Alguem chamado Hsalt tem montou acima em Cidadela de Wissen.",
-          "Ser cuidadoso, estrada e overrung com Tuatara e Devoradores.",
-          "Tuatara general tem montou acima dele base em castelo proximo",
-          "Tuatara General, Svar, e based em aquele antigo castelo.",
-          "O Que e um exercito fazendo em este pantano mesmo assim?",
-          "Como nearest outro, isso e worrisome para me.",
-          "General Svar era um dragao!",
-          "Tuatara sao liderou por real, viver dragoes.",
-          "Aquele significa la sao mais dragoes.",
-          "Bom sorte com aquele.",
-          "Feliz isso esta nao me em seu boots.",
-          "Nos vai fortificar nosso acampamento aqui, herói. Meu obrigado para liderando nos.",
-          "Este aldeia vai ser primeiro de varios nos recuperar.",
-          "Este inteiro terra era uma vez verde pasto.",
-          "goblins e deles magia tem transformado isso para dentro um pantano.",
-          "Principalmente iria ser mais que Eu sempre expected.",
-          "Aquele soa como eles, eles estao muito organizados."
+          "Um novo tipo de guerreiro monstruoso se ergue contra nós agora.",
+          "Não são goblins que estamos enfrentando.",
+          "Uma espécie de homens-réptil. Eles se autodenominam Tuatara.",
+          "Isso é típico deles, são muito organizados.",
+          "Eles tomaram uma torre aqui perto.",
+          "Não conseguimos passar por eles.",
+          "Espero que sim.",
+          "Você mostrou aos Tuataras como os humanos lutam!",
+          "O Patrulheiro Affric liderou um grupo para explorar o antigo bairro universitário.",
+          "Affric acredita que a origem da corrupção está a leste.",
+          "Alguém chamado Hsalt se estabeleceu na Cidadela de Wissen.",
+          "Cuidado, a estrada está infestada de Tuatara e Devoradores.",
+          "O general Tuatara estabeleceu sua base no castelo nas proximidades.",
+          "O General Tuatara, Svar, está naquele antigo castelo.",
+          "Afinal, o que um exército está fazendo nesse pântano?",
+          "E, sendo o alvo mais próximo, isso me preocupa.",
+          "O General Svar era um dragão!",
+          "Os Tuatara são liderados por dragões de verdade, vivos.",
+          "Isso quer dizer que existem mais dragões.",
+          "Boa sorte com isso, vai precisar.",
+          "Ainda bem que eu não sou você.",
+          "Vamos fortificar nosso acampamento aqui, herói|heroína. Obrigado por nos liderar.",
+          "Essa vila será a primeira de várias que vamos recuperar.",
+          "Toda essa terra já foi um campo verdejante.",
+          "Os goblins e sua magia transformaram o lugar em um pântano.",
+          "Boa parte seria muito mais do que jamais imaginei.",
+          "Isso é típico deles, são muito organizados."
         ]
       },
       "srnmayor02hard": {
         "defaultLines": [
-          "Sao voce amigo ou inimigo?",
-          "Fazer voce trazer message de nosso amigos em Sark?",
-          "Nos nao pode confiar estranhos",
-          "Isso Esta bom para ver voce novamente, amigo.",
-          "Seu legend cresce.",
-          "Logo este regiao vai seguir voce qualquer lugar.",
-          "Vizir de Tuatara e criando carnisaurs.",
-          "Vizir pode trabalho para dragao generais...",
-          "Mas nos agora saber ele esta real poder por tras corrupcao.",
-          "de vizir magico experimentos sao criando carnasaurs.",
-          "Ele Esta criando eles para servir como montarias para Tuatara soldados.",
-          "Voce fez isso! Nenhum carnasaur cavaleiros vai atormentar nos.",
-          "Vizir Hsalt e usando de cidadela biblioteca para mal",
-          "Vizir vai ser incrivelmente irado at voce.",
-          "Eu suponho voce esta indo depois ele.",
-          "Ser cuidadoso, de vizir magia faz ele como perigoso como dragoes ele serves.",
-          "biblioteca e liberated!",
-          "Gehrin e Odem acho eles saber onde Tuatara General e.",
-          "Nos tem mais soldados scouting brejo.",
-          "Gehrin e Odem acho eles saber onde outro Tuatara general e.",
+          "Você é amigo ou inimigo?",
+          "Você traz notícias dos nossos amigos de Sark?",
+          "Não podemos confiar em estranhos.",
+          "Que bom te ver de novo, amigo|amiga.",
+          "Sua lenda segue crescendo.",
+          "Em breve, essa região irá acompanhá-lo|acompanhá-la em qualquer lugar.",
+          "O Vizir dos Tuatara está criando carnissauros.",
+          "O Vizir pode estar trabalhando para os generais dragões...",
+          "Mas agora sabemos que ele é quem realmente está por trás da corrupção.",
+          "Os experimentos mágicos do Vizir estão criando carnissauros.",
+          "Ele está criando essas criaturas para servirem de montaria para os soldados Tuatara.",
+          "Você conseguiu! Nenhum cavaleiro montado em carnissauro vai nos atormentar.",
+          "O Vizir Hsalt está usando a biblioteca da Cidadela para fins malignos.",
+          "O Vizir vai ficar furioso com você.",
+          "Imagino que você vai atrás dele.",
+          "Tenha cuidado. A magia do Vizir o torna tão perigoso quanto os dragões a quem ele serve.",
+          "A biblioteca foi libertada!",
+          "Gehrin e Odem acham que sabem onde está o General Tuatara.",
+          "Temos mais soldados explorando o pântano.",
+          "Gehrin e Odem acham que sabem onde está o outro general Tuatara.",
           "Provavelmente.",
-          "Ir ver eles, eles saber mais que Eu."
+          "Vá falar com eles, eles sabem mais do que eu."
         ]
       },
       "srnmayor03hard": {
         "defaultLines": [
           "Nos Estamos ainda scouting este area.",
           "Nos Vamos enviar mensagem quando nos saber mais.",
-          "Feliz voce poderia fazer isso.",
-          "de Tuatara outro general e proximo.",
-          "Mas ele esta diferente que Svath.",
-          "Nos visto sinais de mortos-vivos em dele servico.",
-          "Ha outro General, chamado Svath. Ele Esta em antigo palacio.",
-          "General Svath comanda todos estes Tuatara.",
-          "Provavelmente so, mas este soa como grande irmao.",
-          "e Svath nao apenas comandar Tuatara soldados.",
-          "Ele Esta para dentro scarier coisas.",
-          "Eu significa como mortos-vivos.",
-          "Voce parado dragao invasao em dele tracks!",
-          "O Que e proximo para voce,#tn#?",
-          "Agora aquele Tuatara sao derrotado...",
-          "O Que e seu plano?",
-          "Eu nao pode imagine qualquer um sobreviveu Tuatara Legiao passing atraves."
+          "Que bom que você pôde vir.",
+          "O outro general dos Tuatara está por perto.",
+          "Mas ele é diferente do Svath.",
+          "Vimos sinais de mortos-vivos a serviço dele.",
+          "Há outro General, chamado Svath. Ele está no antigo palácio.",
+          "O General Svath comanda todos esses Tuatara.",
+          "Provavelmente, mas esse parece ser o irmão mais velho.",
+          "E Svath não comanda apenas soldados Tuatara.",
+          "Ele mexe com coisas mais assustadoras.",
+          "Quero dizer, assustadoras tipo mortos-vivos.",
+          "Você conseguiu deter a invasão dos dragões!",
+          "Qual será seu próximo passo, #tn#?",
+          "Agora que os Tuatara foram derrotados...",
+          "Qual é o seu plano?",
+          "Não consigo imaginar que alguém tenha sobrevivido à passagem da Legião Tuatara."
         ]
       },
       "srnmerchant01hard": {
         "displayName": "Descricao em Portugues 92F7B7.",
         "defaultLines": [
-          "Hail. Eu tem um poucos small coisas lagartos nao temos roubado ainda"
+          "Saudações. Tenho algumas coisinhas que os lagartos ainda não roubaram."
         ]
       },
       "srnmerchant03hard": {
         "displayName": "Descricao em Portugues E31D4B.",
         "defaultLines": [
-          "Nao venture para dentro wilds unprepared!"
+          "Não se aventure na selva sem estar preparado!"
         ]
       },
       "srntrainer01hard": {
         "displayName": "Descricao em Portugues 5D569D.",
         "defaultLines": [
-          "Ouviu sobre voce de meu irma",
-          "Voce sao um vicious goblin-matador"
+          "Minha irmã falou bastante de você.",
+          "Você é um|uma caçador|caçadora de goblins implacável."
         ]
       },
       "srntrainer03hard": {
         "displayName": "Descricao em Portugues C3DE41.",
         "defaultLines": [
-          "Acima para um lesson,#tc#?"
+          "A fim de uma aula, #tc#?"
         ]
       },
       "sughhard": {
         "defaultLines": [
-          "Ha algo grande acima em aquele antigo fazenda.",
-          "Eu nao saber o que isso e.",
-          "Eu nao acho isso esta Tuatara embora.",
-          "Eu figured voce iria querer para verificar isso fora.",
-          "Porque Eu realmente nao querer para.",
-          "Fez Eu mention isso sounded grande?",
-          "Ooo! Eu odeio aranhas! Obrigado!",
-          "Um colossal aranha, isso era?",
-          "Eu odeio aranhas.",
-          "Eu Estou feliz isso era voce e nao me!"
+          "Tem algo grande naquela velha fazenda.",
+          "Eu não sei o que é.",
+          "Mas não acho que sejam os Tuatara.",
+          "Imaginei que você gostaria de dar uma olhada.",
+          "Porque eu realmente não quero.",
+          "Eu já disse que parecia ser algo grande?",
+          "Eca! Detesto aranhas! Obrigado!",
+          "Era uma aranha gigantesca, não era?",
+          "Eu detesto aranhas.",
+          "Que bom que foi você e não eu!"
         ]
       },
       "yolafhard": {
         "displayName": "Descricao em Portugues BFE017.",
         "defaultLines": [
-          "Meu mother veio de este terra.",
-          "Ela disse isso era pride de Ellyria.",
-          "Agora isso esta um pantano cheio de ruinas.",
-          "Eu querer para fix isso.",
+          "Minha mãe veio dessa terra.",
+          "Ela dizia que era o orgulho de Ellyria.",
+          "Agora é um pântano cheio de ruínas.",
+          "Eu quero consertar isso, por ela.",
           "Fazer isso como isso e em meu sonhos."
         ]
       }

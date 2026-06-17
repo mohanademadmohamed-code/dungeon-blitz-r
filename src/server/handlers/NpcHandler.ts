@@ -231,6 +231,17 @@ export class NpcHandler {
         }
 
         if (!dialogueId || !missionId) {
+            const scriptedText = NpcDialogueLoader.getScriptedTextForNpc(
+                levelName,
+                dialogueNpcKey,
+                client.character,
+                NpcHandler.getDialogueLanguage(client.character)
+            );
+            if (scriptedText) {
+                NpcHandler.sendNpcBubble(client, npcId, scriptedText);
+                return;
+            }
+
             NpcHandler.sendNpcBubble(
                 client,
                 npcId,
@@ -808,11 +819,7 @@ export class NpcHandler {
             MissionDialogueLoader.getDialogueText(
                 NpcHandler.FIRST_MISSION_ID,
                 4,
-                NpcHandler.getDialogueLanguage(client.character),
-                {
-                    playerClass: client.character?.class,
-                    playerGender: client.character?.gender
-                }
+                NpcHandler.getDialogueLanguage(client.character)
             )
         );
 

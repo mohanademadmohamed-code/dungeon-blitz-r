@@ -43,6 +43,9 @@ export class DialogueTranslationLoader {
         'Made you a monster.',
         'Once I clear the monsters from around Castle Hocke.',
         "The road's clear, now soldiers from Wolf's End can join me...",
+        'I haven\'t unlocked this dungeon yet.',
+        'A powerful magic seals this entrance.',
+        'I still need to learn more about the Sleeping Lands.',
         'Was that a man or a plant?'
     ]);
     private static readonly HELP_FALLBACKS = [
@@ -171,7 +174,37 @@ export class DialogueTranslationLoader {
 
         const female = this.isFemaleGender(playerGender);
         const choose = (maleText: string, femaleText: string): string => female ? femaleText : maleText;
+        const cleanupResolvedMarkers = (value: string): string => value
+            .replace(/Campeã\|Campeã/g, 'Campeã')
+            .replace(/Campeão\|Campeã/g, 'Campeão')
+            .replace(/campeão\|campeã/g, 'campeão')
+            .replace(/acompanhá-lo\|acompanhá-lá/g, choose('acompanhá-lo', 'acompanhá-la'))
+            .replace(/acompanhá-lo\|acompanhá-la/g, choose('acompanhá-lo', 'acompanhá-la'));
         let localized = String(text ?? '')
+            .replace(/\bCampeão\|Campeã\b/g, choose('Campeão', 'Campeã'))
+            .replace(/\bcampeão\|campeã\b/g, choose('campeão', 'campeã'))
+            .replace(/\bmesmo\|mesma\b/g, choose('mesmo', 'mesma'))
+            .replace(/\bMesmo\|Mesma\b/g, choose('Mesmo', 'Mesma'))
+            .replace(/\bacompanhá-lo\|acompanhá-la\b/g, choose('acompanhá-lo', 'acompanhá-la'))
+            .replace(/\bacompanhá-lo\|acompanhá-lá\b/g, choose('acompanhá-lo', 'acompanhá-la'))
+            .replace(/\bfurioso\|furiosa\b/g, choose('furioso', 'furiosa'))
+            .replace(/\bFurioso\|Furiosa\b/g, choose('Furioso', 'Furiosa'))
+            .replace(/\bnenhum\|nenhuma\b/g, choose('nenhum', 'nenhuma'))
+            .replace(/\bNenhum\|Nenhuma\b/g, choose('Nenhum', 'Nenhuma'))
+            .replace(/\bbandido\|bandida\b/g, choose('bandido', 'bandida'))
+            .replace(/\bBandido\|Bandida\b/g, choose('Bandido', 'Bandida'))
+            .replace(/\bum herói digno\|uma heroína digna\b/g, choose('um herói digno', 'uma heroína digna'))
+            .replace(/\bum heroi digno\|uma heroina digna\b/g, choose('um herói digno', 'uma heroína digna'))
+            .replace(/\bdigno\|uma heroína digna\b/g, choose('digno', 'uma heroína digna'))
+            .replace(/\bdigno\|uma heroina digna\b/g, choose('digno', 'uma heroína digna'))
+            .replace(/\bhomem\|dama\b/g, choose('homem', 'dama'))
+            .replace(/\bHomem\|Dama\b/g, choose('Homem', 'Dama'))
+            .replace(/\bO destruidor\|A destruidora\b/g, choose('O destruidor', 'A destruidora'))
+            .replace(/\bHumano maldito\|Humana maldita\b/g, choose('Humano maldito', 'Humana maldita'))
+            .replace(
+                /\bSeu ingrato miserável!\|Sua ingrata miserável!/g,
+                choose('Seu ingrato miserável!', 'Sua ingrata miserável!')
+            )
             .replace(/\bo humano\|a humana\b/g, choose('o humano', 'a humana'))
             .replace(/\bO humano\|A humana\b/g, choose('O humano', 'A humana'))
             .replace(/\bum humano\|uma humana\b/g, choose('um humano', 'uma humana'))
@@ -184,6 +217,8 @@ export class DialogueTranslationLoader {
             .replace(/\bele\|Ela\b/g, choose('ele', 'ela'))
             .replace(/\bEsse\|Essa\b/g, choose('Esse', 'Essa'))
             .replace(/\besse\|essa\b/g, choose('esse', 'essa'))
+            .replace(/\bSeu\|Sua\b/g, choose('Seu', 'Sua'))
+            .replace(/\bseu\|sua\b/g, choose('seu', 'sua'))
             .replace(/\bdele\|dela\b/g, choose('dele', 'dela'))
             .replace(/\bDele\|Dela\b/g, choose('Dele', 'Dela'))
             .replace(/\bdo\|da\b/g, choose('do', 'da'))
@@ -202,6 +237,10 @@ export class DialogueTranslationLoader {
             .replace(/\birmão\|irmã\b/g, choose('irmão', 'irmã'))
             .replace(/\bnovo\|nova\b/g, choose('novo', 'nova'))
             .replace(/\bNovo\|Nova\b/g, choose('Novo', 'Nova'))
+            .replace(/\benviado\|enviada\b/g, choose('enviado', 'enviada'))
+            .replace(/\bEnviado\|Enviada\b/g, choose('Enviado', 'Enviada'))
+            .replace(/\bmaldito\|maldita\b/g, choose('maldito', 'maldita'))
+            .replace(/\bMaldito\|Maldita\b/g, choose('Maldito', 'Maldita'))
             .replace(/\bhomem\|mulher\b/g, choose('homem', 'mulher'))
             .replace(/\bHomem\|Mulher\b/g, choose('Homem', 'Mulher'))
             .replace(/\bum\|uma\b/g, choose('um', 'uma'))
@@ -216,16 +255,28 @@ export class DialogueTranslationLoader {
             .replace(/\bCaçador\|Caçadora\b/g, choose('Caçador', 'Caçadora'))
             .replace(/\bverdadeiro\|verdadeira\b/g, choose('verdadeiro', 'verdadeira'))
             .replace(/\bVerdadeiro\|Verdadeira\b/g, choose('Verdadeiro', 'Verdadeira'))
+            .replace(/\bvitorioso\|vitoriosa\b/g, choose('vitorioso', 'vitoriosa'))
+            .replace(/\bVitorioso\|Vitoriosa\b/g, choose('Vitorioso', 'Vitoriosa'))
             .replace(/\bdurão\|durona\b/g, choose('durão', 'durona'))
             .replace(/\bDurão\|Durona\b/g, choose('Durão', 'Durona'))
+            .replace(/\bchorão\|chorona\b/g, choose('chorão', 'chorona'))
+            .replace(/\bChorão\|Chorona\b/g, choose('Chorão', 'Chorona'))
             .replace(/\bespião\|espiã\b/g, choose('espião', 'espiã'))
             .replace(/\bEspião\|Espiã\b/g, choose('Espião', 'Espiã'))
             .replace(/\bsabotador\|sabotadora\b/g, choose('sabotador', 'sabotadora'))
             .replace(/\bSabotador\|Sabotadora\b/g, choose('Sabotador', 'Sabotadora'))
             .replace(/\bassassino\|assassina\b/g, choose('assassino', 'assassina'))
             .replace(/\bAssassino\|Assassina\b/g, choose('Assassino', 'Assassina'))
+            .replace(/\bdestruidor\|destruidora\b/g, choose('destruidor', 'destruidora'))
+            .replace(/\bDestruidor\|Destruidora\b/g, choose('Destruidor', 'Destruidora'))
+            .replace(/\bdesgraçado\|desgraçada\b/g, choose('desgraçado', 'desgraçada'))
+            .replace(/\bDesgraçado\|Desgraçada\b/g, choose('Desgraçado', 'Desgraçada'))
             .replace(/\bhumano\|humana\b/g, choose('humano', 'humana'))
             .replace(/\bHumano\|Humana\b/g, choose('Humano', 'Humana'))
+            .replace(/\bingrato\|ingrata\b/g, choose('ingrato', 'ingrata'))
+            .replace(/\bIngrato\|Ingrata\b/g, choose('Ingrato', 'Ingrata'))
+            .replace(/\bmentiroso\|mentirosa\b/g, choose('mentiroso', 'mentirosa'))
+            .replace(/\bMentiroso\|Mentirosa\b/g, choose('Mentiroso', 'Mentirosa'))
             .replace(/\bobrigado\|obrigada\b/g, choose('obrigado', 'obrigada'))
             .replace(/\bObrigado\|Obrigada\b/g, choose('Obrigado', 'Obrigada'))
             .replace(/\bbem-vindo,\|bem-vinda,/g, choose('bem-vindo,', 'bem-vinda,'))
@@ -240,14 +291,28 @@ export class DialogueTranslationLoader {
             .replace(/\bAmigo\.\|Amiga\./g, choose('Amigo.', 'Amiga.'))
             .replace(/\bamigo\|amiga\b/g, choose('amigo', 'amiga'))
             .replace(/\bAmigo\|Amiga\b/g, choose('Amigo', 'Amiga'))
+            .replace(/\blacaio\|lacaia\b/g, choose('lacaio', 'lacaia'))
+            .replace(/\bLacaio\|Lacaia\b/g, choose('Lacaio', 'Lacaia'))
             .replace(/\bherói\|heroína\b/g, choose('herói', 'heroína'))
             .replace(/\bHerói\|Heroína\b/g, choose('Herói', 'Heroína'))
             .replace(/\bheroi\|heroina\b/g, choose('herói', 'heroína'))
             .replace(/\bHeroi\|Heroina\b/g, choose('Herói', 'Heroína'));
 
         if (!female) {
-            return localized;
+            return cleanupResolvedMarkers(localized);
         }
+
+        const protectedHumanReferences = new Map<string, string>();
+        const protectHumanReference = (value: string): string => {
+            const token = `__PTBR_HUMAN_REFERENCE_${protectedHumanReferences.size}__`;
+            protectedHumanReferences.set(token, value);
+            return token;
+        };
+
+        localized = localized
+            .replace(/\bVocê é humano!/g, protectHumanReference)
+            .replace(/\bVocÃª Ã© humano!/g, protectHumanReference)
+            .replace(/\bQualquer amigo de Nephit é meu inimigo\./g, protectHumanReference);
 
         localized = localized
             .replace(/\bO Caçador do Kraken\b/g, 'A Caçadora do Kraken')
@@ -304,8 +369,6 @@ export class DialogueTranslationLoader {
             .replace(/\bSabotador\b/g, 'Sabotadora')
             .replace(/\bassassino\b/g, 'assassina')
             .replace(/\bAssassino\b/g, 'Assassina')
-            .replace(/\bObrigado\b/g, 'Obrigada')
-            .replace(/\bobrigado\b/g, 'obrigada')
             .replace(/\bum homem\b/g, 'uma mulher')
             .replace(/\bUm homem\b/g, 'Uma mulher')
             .replace(/\bhomem\b/g, 'mulher')
@@ -313,7 +376,11 @@ export class DialogueTranslationLoader {
             .replace(/\bHm, obrigada, vou pensar melhor nisso\./g, 'Hm, obrigado, vou pensar melhor nisso.')
             .replace(/\bAquilo era uma mulher ou uma planta\?/g, 'Aquilo era um homem ou uma planta?');
 
-        return localized;
+        for (const [token, value] of protectedHumanReferences) {
+            localized = localized.replaceAll(token, value);
+        }
+
+        return cleanupResolvedMarkers(localized);
     }
 
     private static localizePortugueseGenderedText(locale: string, text: string, playerGender?: string): string {
@@ -423,9 +490,26 @@ export class DialogueTranslationLoader {
     ): string {
         const key = this.normalizeKey(text);
         const strippedKey = this.stripClientDirectives(key);
-        return translations.get(key) ??
-            translations.get(strippedKey) ??
-            this.translateTemplateText(locale, this.translationTemplatesByLocale.get(locale) ?? [], text, playerGender);
+        const exactTranslation = translations.get(key);
+        if (exactTranslation) {
+            return exactTranslation;
+        }
+
+        const strippedTranslation = translations.get(strippedKey);
+        if (strippedTranslation) {
+            return this.preserveClientVisualDirectives(key, strippedTranslation);
+        }
+
+        return this.translateTemplateText(locale, this.translationTemplatesByLocale.get(locale) ?? [], text, playerGender);
+    }
+
+    private static preserveClientVisualDirectives(source: string, translation: string): string {
+        const thoughtPrefix = this.normalizeKey(source).match(/^(?:\^t\s*)+/)?.[0] ?? '';
+        if (thoughtPrefix && !/^\^t\s*/.test(translation)) {
+            return `${thoughtPrefix}${translation}`;
+        }
+
+        return translation;
     }
 
     private static isKnownTranslatedValue(locale: string, text: string): boolean {
@@ -469,6 +553,12 @@ export class DialogueTranslationLoader {
 
     private static looksLikeEnglishText(text: string): boolean {
         return /[A-Za-z]{2,}/.test(text);
+    }
+
+    private static looksLikePortugueseText(text: string): boolean {
+        const clean = this.stripClientDirectives(text);
+        return /[\u00c0-\u00ff]/.test(clean) ||
+            /\b(?:voce|voc\u00ea|voces|voc\u00eas|seu|sua|ele|ela|foi|enviado|enviada|pelo|pela|rei|idiota|maldito|maldita|desertora|desertoras|heroina|hero\u00edna|heroinas|hero\u00ednas|miseravel|miser\u00e1vel|miseraveis|miser\u00e1veis|nao|n\u00e3o|sim|aqui|agora|muito|muita|todos|todas|duas)\b/i.test(clean);
     }
 
     private static pickFallback(text: string, choices: string[]): string {
@@ -646,6 +736,22 @@ export class DialogueTranslationLoader {
             }
             if (options.fallbackToGeneric) {
                 if (normalizedLocale === 'pt-br') {
+                    const strippedText = this.stripClientDirectives(text);
+                    if (!this.looksLikeEnglishText(strippedText) || this.looksLikePortugueseText(strippedText)) {
+                        return normalizeDialogueTextForClient(
+                            this.localizePortugueseGenderedText(
+                                normalizedLocale,
+                                this.localizePortugueseClassPlaceholder(
+                                    normalizedLocale,
+                                    text,
+                                    options.playerClass,
+                                    options.playerGender
+                                ),
+                                options.playerGender
+                            ),
+                            normalizedLocale
+                        );
+                    }
                     return localizeUnknownPortugueseText(text);
                 }
                 return normalizeDialogueTextForClient(

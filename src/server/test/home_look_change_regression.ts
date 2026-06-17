@@ -3,7 +3,9 @@ import { Character } from '../database/Database';
 import { JsonAdapter } from '../database/JsonAdapter';
 import { CharacterHandler } from '../handlers/CharacterHandler';
 import { BitBuffer } from '../network/protocol/bitBuffer';
+import { BitReader } from '../network/protocol/bitReader';
 import { GlobalState } from '../core/GlobalState';
+import { PresenceService } from '../core/PresenceService';
 
 type SentPacket = {
     id: number;
@@ -103,12 +105,16 @@ function createObserver(token: number, entityId: number, level: string = 'CraftT
 }
 
 function createLookChangePacket(): Buffer {
+    return createLookChangePacketWithGender('Male');
+}
+
+function createLookChangePacketWithGender(gender: string): Buffer {
     const bb = new BitBuffer();
     bb.writeMethod26('Head03');
     bb.writeMethod26('MDo03');
     bb.writeMethod26('MM06');
     bb.writeMethod26('MF03');
-    bb.writeMethod26('Male');
+    bb.writeMethod26(gender);
     bb.writeMethod20(24, 0x515151);
     bb.writeMethod20(24, 0xffc3b2);
     return bb.toBuffer();
@@ -191,8 +197,80 @@ async function testHomeLookChangePersistsAndRefreshesSnapshot(): Promise<void> {
     assert.equal(localEntity?.skinColor, 0xffc3b2);
 }
 
+async function testPortugueseHomeLookGenderChangeUpdatesPresenceForHostReload(): Promise<void> {
+    const client = createClient();
+    client.character.dialogueLanguage = 'pt-br';
+    const originalSaveCharacterSnapshot = JsonAdapter.prototype.saveCharacterSnapshot;
+    const originalSessionsByToken = GlobalState.sessionsByToken;
+    const originalLevelEntities = GlobalState.levelEntities;
+
+    JsonAdapter.prototype.saveCharacterSnapshot = async function(_userId: number, character: Character): Promise<Character[]> {
+        return [character];
+    };
+    GlobalState.sessionsByToken = new Map([[client.token, client as never]]);
+    GlobalState.levelEntities = new Map([
+        ['CraftTown', new Map([[client.clientEntID, client.entities.get(client.clientEntID)]])]
+    ]);
+
+    let snapshotGender = '';
+    try {
+        await CharacterHandler.handleHomeLookChange(client as never, createLookChangePacketWithGender('Female'));
+        snapshotGender = PresenceService.listSessions()
+            .find((entry) => entry.characterName === client.character.name)
+            ?.characterGender ?? '';
+    } finally {
+        JsonAdapter.prototype.saveCharacterSnapshot = originalSaveCharacterSnapshot;
+        GlobalState.sessionsByToken = originalSessionsByToken;
+        GlobalState.levelEntities = originalLevelEntities;
+    }
+
+    assert.equal(client.character.gender, 'Female');
+    const reloadPacket = client.sentPackets.find((packet) => packet.id === 0x44);
+    assert.ok(reloadPacket, 'PT-BR gender changes should request a localized page reload');
+    assert.equal(
+        new BitReader(reloadPacket!.payload).readMethod26(),
+        'DB_LOCALIZATION_RELOAD:http://localhost:8000/?lang=pt-br&gender=female'
+    );
+    assert.equal(snapshotGender, 'Female');
+}
+
+async function testPortugueseHomeLookInfersMaleWhenClientOmitsGender(): Promise<void> {
+    const client = createClient();
+    client.character.gender = 'Female';
+    client.character.dialogueLanguage = 'pt-br';
+    const originalSaveCharacterSnapshot = JsonAdapter.prototype.saveCharacterSnapshot;
+    const originalSessionsByToken = GlobalState.sessionsByToken;
+    const originalLevelEntities = GlobalState.levelEntities;
+
+    JsonAdapter.prototype.saveCharacterSnapshot = async function(_userId: number, character: Character): Promise<Character[]> {
+        return [character];
+    };
+    GlobalState.sessionsByToken = new Map([[client.token, client as never]]);
+    GlobalState.levelEntities = new Map([
+        ['CraftTown', new Map([[client.clientEntID, client.entities.get(client.clientEntID)]])]
+    ]);
+
+    try {
+        await CharacterHandler.handleHomeLookChange(client as never, createLookChangePacketWithGender(''));
+    } finally {
+        JsonAdapter.prototype.saveCharacterSnapshot = originalSaveCharacterSnapshot;
+        GlobalState.sessionsByToken = originalSessionsByToken;
+        GlobalState.levelEntities = originalLevelEntities;
+    }
+
+    assert.equal(client.character.gender, 'Male');
+    const reloadPacket = client.sentPackets.find((packet) => packet.id === 0x44);
+    assert.ok(reloadPacket, 'PT-BR male appearance should request a localized page reload');
+    assert.equal(
+        new BitReader(reloadPacket!.payload).readMethod26(),
+        'DB_LOCALIZATION_RELOAD:http://localhost:8000/?lang=pt-br&gender=male'
+    );
+}
+
 async function main(): Promise<void> {
     await testHomeLookChangePersistsAndRefreshesSnapshot();
+    await testPortugueseHomeLookGenderChangeUpdatesPresenceForHostReload();
+    await testPortugueseHomeLookInfersMaleWhenClientOmitsGender();
     console.log('home_look_change_regression: ok');
 }
 

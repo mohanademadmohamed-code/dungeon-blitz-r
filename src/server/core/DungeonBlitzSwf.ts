@@ -15,7 +15,7 @@ import { Config } from './config';
 export type DungeonBlitzSwfMode = 'local' | 'multiplayer';
 export type DungeonBlitzSwfLocale = 'en' | 'tr' | 'pt-br';
 
-export const SWF_RUNTIME_VERSION = '20260613-ptbr-v160';
+export const SWF_RUNTIME_VERSION = '20260615-ptbr-v184';
 
 const LOCAL_HOST = 'localhost';
 const REMOTE_HOST = Config.MULTIPLAYER_HOST;
@@ -49,11 +49,29 @@ const FINAL_PRE_CACHE_BUST_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/Dung
 const FINAL_PRE_CACHE_BUST_LOCAL_REFRESH_URL_LEGACY = 'http://localhost/p/cbp/DungeonBlitz.swf?fv=cby&gv=cbw';
 const FINAL_PRE_CACHE_BUST_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cby&gv=cbw`;
 const FINAL_PRE_CACHE_BUST_REMOTE_REFRESH_URL_LEGACY = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cby&gv=cbw`;
-const LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cbz&gv=cbx';
-const LOCAL_PORTUGUESE_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cbz&gv=cbx&lang=pt-br';
+const PREVIOUS_CACHE_BUST_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdc&gv=cdc';
+const PREVIOUS_CACHE_BUST_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdc&gv=cdc`;
+const LAST_CACHE_BUST_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdd&gv=cdd';
+const LAST_CACHE_BUST_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdd&gv=cdd`;
+const BROKEN_CACHE_BUST_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cde&gv=cde';
+const BROKEN_CACHE_BUST_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cde&gv=cde`;
+const CURRENT_CACHE_BUST_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdf&gv=cdf';
+const CURRENT_CACHE_BUST_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdf&gv=cdf`;
+const LAST_CACHE_BUST_2_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdg&gv=cdg';
+const LAST_CACHE_BUST_2_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdg&gv=cdg`;
+const LAST_CACHE_BUST_3_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdh&gv=cdh';
+const LAST_CACHE_BUST_3_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdh&gv=cdh`;
+const LAST_CACHE_BUST_4_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdi&gv=cdi';
+const LAST_CACHE_BUST_4_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdi&gv=cdi`;
+const LAST_CACHE_BUST_5_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdj&gv=cdj';
+const LAST_CACHE_BUST_5_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdj&gv=cdj`;
+const LAST_CACHE_BUST_6_LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdk&gv=cdk';
+const LAST_CACHE_BUST_6_REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdk&gv=cdk`;
+const LOCAL_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl';
+const LOCAL_PORTUGUESE_REFRESH_URL = 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl&lang=pt-br';
 const LOCAL_REFRESH_URL_LEGACY = 'http://localhost/p/cbp/DungeonBlitz.swf?fv=cbz&gv=cbx';
-const REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cbz&gv=cbx`;
-const REMOTE_PORTUGUESE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cbz&gv=cbx&lang=pt-br`;
+const REMOTE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl`;
+const REMOTE_PORTUGUESE_REFRESH_URL = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl&lang=pt-br`;
 const REMOTE_REFRESH_URL_LEGACY = `http://${REMOTE_HOST}/p/cbp/DungeonBlitz.swf?fv=cbz&gv=cbx`;
 const MOUNT_SPEED_PATCH_CLASS = 'CombatState';
 const MOUNT_SPEED_PATCH_METHOD = 'method_960';
@@ -91,7 +109,9 @@ const UI1_TAG_ONLY_OLDVALUES = new Set([
     'Pântano da Rosa Negra'
 ]);
 const UI1_PORTUGUESE_EDIT_TEXT_XMAX = new Map<number, number>([
-    [85, 4400],
+    // Mission offer title. Long Portuguese titles such as "Relatório do Posto
+    // Avançado" need a little more of the existing header width.
+    [85, 5600],
     // Social panel tabs/buttons.
     [17, 1600],
     [41, 2800],
@@ -124,12 +144,14 @@ const UI1_PORTUGUESE_EDIT_TEXT_XMAX = new Map<number, number>([
     [2617, 2600],
     // World map quest tooltip title. Keep the original layout, but allow longer
     // PT-BR mission names to render instead of being clipped mid-word.
-    [1134, 6500],
-    [1139, 6500],
-    [1109, 6500],
-    [1125, 6500],
-    [1136, 3300],
-    [1141, 3300],
+    [1134, 9000],
+    [1139, 9000],
+    [1109, 9000],
+    [1125, 9000],
+    [1136, 6500],
+    [1141, 6500],
+    [1149, 11000],
+    [1163, 11000],
     // Dungeon hover popup title (e.g. "Fable of the Lost Temple" placeholder).
     [1314, 6500],
     [1672, 7200],
@@ -148,9 +170,13 @@ const UI1_PORTUGUESE_EDIT_TEXT_BOUNDS = new Map<number, { xmin: number; xmax: nu
     [1059, { xmin: -520, xmax: 6680 }] // Map scroll header title.
 ]);
 const UI1_PORTUGUESE_EDIT_TEXT_FONT_HEIGHT = new Map<number, number>([
+    [1136, 330],
+    [1141, 330],
     [1305, 285] // Keep "Sair da Masmorra" inside the score screen button.
 ]);
-const UI1_PORTUGUESE_SPRITE_PLACEMENT_PATCHES = new Map<number, Map<number, { tx?: number; ty?: number; scaleX?: number }>>([
+type SwfSpritePlacementPatch = { tx?: number; ty?: number; scaleX?: number };
+
+const UI1_PORTUGUESE_SPRITE_PLACEMENT_PATCHES = new Map<number, Map<number, SwfSpritePlacementPatch>>([
     [18, new Map([[1, { scaleX: 1.42 }]])], // Ignorados tab background.
     [42, new Map([[2, { ty: 120 }]])], // Add Ignored footer plus icon.
     [43, new Map([[15, { tx: 2860 }]])], // Add Ignored footer action.
@@ -389,6 +415,7 @@ const UI4_PORTUGUESE_EDIT_TEXT_FONT_HEIGHT = new Map<number, number>([
     [3745, 380]
 ]);
 const UI4_PORTUGUESE_EDIT_TEXT_BOUNDS = new Map<number, { xmin: number; xmax: number }>([
+    [1140, { xmin: -120, xmax: 4150 }], // Bottom HUD quest tracker description: centered modest PT-BR width.
     [592, { xmin: -40, xmax: 3900 }], // Preserve position and reveal the final glyph.
     [598, { xmin: -40, xmax: 3900 }], // Alternate talent screen variant.
     [2277, { xmin: -40, xmax: 6900 }],
@@ -468,6 +495,14 @@ function isBrazilianPortugueseMainSwfTextEnabled(): boolean {
 
 function isBrazilianPortugueseEmotePatchEnabled(): boolean {
     return process.env.DB_PTBR_EMOTE_PATCHES !== '0';
+}
+function isBrazilianPortugueseMainSwfBytecodePatchEnabled(): boolean {
+    return process.env.DB_PTBR_MAIN_SWF_BYTECODE_PATCHES !== '0';
+}
+
+function isBrazilianPortugueseBytecodePatchGroupEnabled(groupName: string): boolean {
+    return isBrazilianPortugueseMainSwfBytecodePatchEnabled() ||
+        process.env[`DB_PTBR_${groupName}_PATCHES`] === '1';
 }
 
 const TURKISH_DISCIPLINE_REPLACEMENTS: StringReplacement[] = [
@@ -574,6 +609,7 @@ const BRAZILIAN_PORTUGUESE_DISCIPLINE_REPLACEMENTS: StringReplacement[] = [
     { oldValue: 'Discipline Masteries', newValue: 'Maestrias da Disciplina' },
     { oldValue: 'Captain Fink', newValue: 'Capitão Fink' },
     { oldValue: 'Mayor Ristas', newValue: 'Prefeito Ristas' },
+    { oldValue: 'Sub-Warden Gunter', newValue: 'Guarda Gunter' },
     { oldValue: 'No Quests Available', newValue: 'Não há missões disponíveis' },
     { oldValue: 'Quest Available\nTalk to ', newValue: 'Missão Disponível\nFale com ' },
     { oldValue: 'Quest Available\nHead to ', newValue: 'Missão Disponível\nVá para ' },
@@ -967,7 +1003,18 @@ export const BRAZILIAN_PORTUGUESE_LEVELS_SRN_REPLACEMENTS: StringReplacement[] =
 
 export const BRAZILIAN_PORTUGUESE_LEVELS_BT_REPLACEMENTS: StringReplacement[] = [
     { oldValue: 'Warden Maximilian', newValue: 'Guardião Maximilian' },
+    { oldValue: 'Sub-Warden Gunter', newValue: 'Guarda Gunter' },
     { oldValue: 'Steward of Felbridge', newValue: 'Intendente de Felbridge' },
+    { oldValue: 'Tessa, The High Witch', newValue: 'Tessa, a Grande Bruxa' },
+    { oldValue: "Meylour's spawn, come!", newValue: 'Crias de Meylour, venham!' },
+    {
+        oldValue: 'Time to put an end to the Steward and whoever is in league with him',
+        newValue: 'É hora de acabar com o Intendente e quem quer que sejam seus aliados.'
+    },
+    { oldValue: 'Meylour commands! I slay!', newValue: 'Meylour manda! Eu mato!' },
+    { oldValue: 'You will die on the mountain.', newValue: 'Você morrerá na montanha.' },
+    { oldValue: 'It is foretold.', newValue: 'Está profetizado.' },
+    { oldValue: 'Master, we are coming!', newValue: 'Mestre, estamos indo!' },
     { oldValue: 'Bandit Camp', newValue: 'Acampamento Bandido' },
     { oldValue: "Svagg's Last Stand", newValue: 'Última Batalha de Svagg' },
     { oldValue: 'A Última Batalha de Svagg', newValue: 'Última Batalha de Svagg' },
@@ -1047,6 +1094,7 @@ const BRAZILIAN_PORTUGUESE_MAIN_SWF_SAFE_REPLACEMENTS: StringReplacement[] = [
     { oldValue: 'Captain Fink', newValue: 'Capitão Fink' },
     { oldValue: 'Captain Gar', newValue: 'Capitão Gar' },
     { oldValue: 'Mayor Ristas', newValue: 'Prefeito Ristas' },
+    { oldValue: 'Sub-Warden Gunter', newValue: 'Guarda Gunter' },
     // BRM NPC titles
     { oldValue: 'Headwoman Gran', newValue: 'Diretora Gran' },
     { oldValue: 'Alderman Abbod', newValue: 'Vereador Abbod' },
@@ -1347,6 +1395,113 @@ function buildBrazilianPortugueseDoorPlateLabelPatches(abc: ReturnType<typeof pa
     return patches;
 }
 
+const BRAZILIAN_PORTUGUESE_COMPACT_DOOR_PLATE_NAMES = [
+    'Tumba de Lorde Hugh Tilly',
+    'Tumba de Lorde Peter Tilly',
+    'Tumba de Sir Edmund Tilly'
+];
+
+function buildBrazilianPortugueseCompactDoorPlateNamePatches(
+    ctx: ReturnType<typeof parseSwf>,
+    abc: ReturnType<typeof parseAbc>,
+    internString: StringInterner
+) {
+    for (const name of BRAZILIAN_PORTUGUESE_COMPACT_DOOR_PLATE_NAMES) {
+        internString(name);
+    }
+
+    const entityClassIndex = classIndexByName(abc, 'Entity');
+    if (entityClassIndex === null) {
+        throw new Error('Entity class not found for PT-BR door plate name layout');
+    }
+    const methodIdx = methodIdxForTrait(abc.instances[entityClassIndex].traits, abc, 'method_579');
+    if (methodIdx === null) {
+        throw new Error('Entity.method_579 not found for PT-BR door plate name layout');
+    }
+    const methodBody = abc.methodBodies.get(methodIdx);
+    if (!methodBody) {
+        throw new Error('Entity.method_579 body not found for PT-BR door plate name layout');
+    }
+
+    const code = ctx.body.subarray(methodBody.codeStart, methodBody.codeStart + methodBody.codeLen);
+    const instructions = disassemble(code, 'Entity.method_579.ptbr-door-plate-name-layout');
+    let insertionOffset = -1;
+    for (let index = 0; index <= instructions.length - 5; index += 1) {
+        const [getMathUtil, getDoorPlate, getMapName, getDisplayName, setText] = instructions.slice(index, index + 5);
+        if (
+            getMathUtil.opcode === 0x60 &&
+            u30OperandName(getMathUtil, abc.multinameNames) === 'MathUtil' &&
+            getDoorPlate.opcode === 0x62 &&
+            getDoorPlate.operands[0]?.[1] === 8 &&
+            getMapName.opcode === 0x66 &&
+            u30OperandName(getMapName, abc.multinameNames) === 'am_MapName' &&
+            getDisplayName.opcode === 0x62 &&
+            getDisplayName.operands[0]?.[1] === 6 &&
+            setText.opcode === 0x4f &&
+            u30OperandName(setText, abc.multinameNames) === 'method_2' &&
+            setText.operands[1]?.[1] === 2
+        ) {
+            insertionOffset = setText.offset + setText.size;
+            break;
+        }
+    }
+    if (insertionOffset < 0) {
+        throw new Error('Entity.method_579 door plate am_MapName SetText call not found');
+    }
+
+    const amMapNameIndex = findMultinameIndex(abc, 'am_MapName');
+    const widthIndex = findMultinameIndex(abc, 'width');
+    const scaleXIndex = findMultinameIndex(abc, 'scaleX');
+    const layoutCode = Buffer.concat(BRAZILIAN_PORTUGUESE_COMPACT_DOOR_PLATE_NAMES.map((name) => {
+        const compactName = Buffer.concat([
+            Buffer.from([0x62]), writeU30(8),
+            Buffer.from([0x66]), writeU30(amMapNameIndex),
+            Buffer.from([0x2a]),
+            Buffer.from([0x66]), writeU30(widthIndex),
+            pushByteInstruction(30),
+            Buffer.from([0xa0]),
+            Buffer.from([0x61]), writeU30(widthIndex),
+            Buffer.from([0x62]), writeU30(8),
+            Buffer.from([0x66]), writeU30(amMapNameIndex),
+            pushByteInstruction(90),
+            pushByteInstruction(100),
+            Buffer.from([0xa3]),
+            Buffer.from([0x61]), writeU30(scaleXIndex)
+        ]);
+        return Buffer.concat([
+            Buffer.from([0x62]), writeU30(6),
+            pushStringInstruction(internString(name)),
+            Buffer.from([0x14]),
+            writeS24(compactName.length),
+            compactName
+        ]);
+    }));
+
+    return [
+        {
+            key: 'ptbr-door-plate-specific-name-layout',
+            start: methodBody.codeStart + insertionOffset,
+            end: methodBody.codeStart + insertionOffset,
+            data: layoutCode,
+            detail: 'widen then compact only the three long PT-BR Tilly tomb door plate names'
+        },
+        {
+            key: 'ptbr-door-plate-specific-name-layout-code-length',
+            start: methodBody.codeLenPos,
+            end: methodBody.codeStart,
+            data: writeU30(methodBody.codeLen + layoutCode.length),
+            detail: 'increase Entity.method_579 code length for specific PT-BR door plate names'
+        },
+        ...buildBranchAdjustmentPatches(
+            methodBody,
+            code,
+            insertionOffset,
+            layoutCode.length,
+            'Entity.method_579.ptbr-door-plate-specific-name-layout'
+        )
+    ];
+}
+
 function getReplacements(mode: DungeonBlitzSwfMode, locale: DungeonBlitzSwfLocale): StringReplacement[] {
     const localeReplacements =
         locale === 'tr'
@@ -1390,6 +1545,24 @@ function getReplacements(mode: DungeonBlitzSwfMode, locale: DungeonBlitzSwfLocal
             { oldValue: FINAL_PRE_CACHE_BUST_REMOTE_REFRESH_URL_LEGACY, newValue: localRefreshUrl },
             { oldValue: FINAL_PRE_CACHE_BUST_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
             { oldValue: FINAL_PRE_CACHE_BUST_LOCAL_REFRESH_URL_LEGACY, newValue: localRefreshUrl },
+            { oldValue: PREVIOUS_CACHE_BUST_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: PREVIOUS_CACHE_BUST_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: BROKEN_CACHE_BUST_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: BROKEN_CACHE_BUST_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: CURRENT_CACHE_BUST_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: CURRENT_CACHE_BUST_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_2_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_2_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_3_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_3_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_4_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_4_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_5_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_5_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_6_REMOTE_REFRESH_URL, newValue: localRefreshUrl },
+            { oldValue: LAST_CACHE_BUST_6_LOCAL_REFRESH_URL, newValue: localRefreshUrl },
             { oldValue: REMOTE_REFRESH_URL, newValue: localRefreshUrl },
             { oldValue: REMOTE_REFRESH_URL_LEGACY, newValue: localRefreshUrl },
             { oldValue: LOCAL_REFRESH_URL_LEGACY, newValue: localRefreshUrl },
@@ -1429,6 +1602,24 @@ function getReplacements(mode: DungeonBlitzSwfMode, locale: DungeonBlitzSwfLocal
         { oldValue: FINAL_PRE_CACHE_BUST_LOCAL_REFRESH_URL_LEGACY, newValue: remoteRefreshUrl },
         { oldValue: FINAL_PRE_CACHE_BUST_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
         { oldValue: FINAL_PRE_CACHE_BUST_REMOTE_REFRESH_URL_LEGACY, newValue: remoteRefreshUrl },
+        { oldValue: PREVIOUS_CACHE_BUST_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: PREVIOUS_CACHE_BUST_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: BROKEN_CACHE_BUST_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: BROKEN_CACHE_BUST_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: CURRENT_CACHE_BUST_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: CURRENT_CACHE_BUST_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_2_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_2_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_3_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_3_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_4_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_4_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_5_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_5_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_6_LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
+        { oldValue: LAST_CACHE_BUST_6_REMOTE_REFRESH_URL, newValue: remoteRefreshUrl },
         { oldValue: LOCAL_REFRESH_URL, newValue: remoteRefreshUrl },
         { oldValue: REMOTE_REFRESH_URL_LEGACY, newValue: remoteRefreshUrl },
         { oldValue: LOCAL_REFRESH_URL_LEGACY, newValue: remoteRefreshUrl },
@@ -1580,6 +1771,85 @@ function buildAllSwfStringReplacementBody(
     return { body, changed };
 }
 
+function buildSwfStringSubstringReplacementBody(
+    ctx: ReturnType<typeof parseSwf>,
+    replacements: StringReplacement[]
+): {
+    body: Buffer;
+    changed: boolean;
+} {
+    const abc = parseAbc(ctx);
+    const patches = [];
+
+    for (let index = 1; index < abc.stringValues.length; index++) {
+        const sourceValue = abc.stringValues[index];
+        let nextValue = sourceValue;
+        for (const replacement of longestFirstReplacements(replacements)) {
+            nextValue = nextValue.split(replacement.oldValue).join(replacement.newValue);
+        }
+        if (nextValue === sourceValue) {
+            continue;
+        }
+
+        const replacementBytes = Buffer.from(nextValue, 'utf8');
+        const originalBytes = Buffer.from(sourceValue, 'utf8');
+        patches.push({
+            key: `substring-string:${sourceValue}:${index}`,
+            start: abc.stringLenPositions[index],
+            end: abc.stringDataPositions[index] + originalBytes.length,
+            data: Buffer.concat([writeU30(replacementBytes.length), replacementBytes]),
+            detail: `${sourceValue} -> ${nextValue}`
+        });
+    }
+
+    if (patches.length === 0) {
+        return { body: Buffer.from(ctx.body), changed: false };
+    }
+
+    const { body, delta } = applyPatchesToBody(ctx.body, patches);
+    const outBody = Buffer.from(body);
+    if (delta !== 0) {
+        outBody.writeUInt32LE(ctx.doabcLen + delta, ctx.doabcLenFieldPos);
+    }
+
+    return { body: outBody, changed: true };
+}
+
+function buildAllSwfStringSubstringReplacementBody(
+    ctx: ReturnType<typeof parseSwf>,
+    replacements: StringReplacement[],
+    initialBody: Buffer = ctx.body
+): {
+    body: Buffer;
+    changed: boolean;
+} {
+    let body: Buffer = Buffer.from(initialBody);
+    let changed = false;
+    let deltaOffset = 0;
+
+    for (const tag of collectDoAbcTags(ctx, initialBody)) {
+        const tagCtx = {
+            ...ctx,
+            body,
+            abcStart: tag.abcStart + deltaOffset,
+            doabcLenFieldPos: tag.doabcLenFieldPos + deltaOffset,
+            doabcLen: tag.doabcLen
+        };
+        const replaced = buildSwfStringSubstringReplacementBody(tagCtx, replacements);
+        if (!replaced.changed) {
+            continue;
+        }
+        if (!tag.hasLongLength && replaced.body.length !== body.length) {
+            throw new Error(`Cannot resize short DoABC tag in ${ctx.path}`);
+        }
+        deltaOffset += replaced.body.length - body.length;
+        body = replaced.body;
+        changed = true;
+    }
+
+    return { body, changed };
+}
+
 export function buildSwfStringReplacementBuffer(
     swfPath: string,
     replacements: StringReplacement[]
@@ -1693,6 +1963,14 @@ export function buildPortugueseExactAssetSwfBuffer(
     const ctx = parseSwf(swfPath);
     const patched = replaceSwfTagBytesInBody(ctx.body, replacements, true);
     return patched.changed ? encodeSwfBuffer(ctx, patched.body) : Buffer.from(fs.readFileSync(swfPath));
+}
+
+export function buildPortugueseLevelsBtSwfBuffer(swfPath: string): Buffer {
+    const ctx = parseSwf(swfPath);
+    const substringPatched = buildAllSwfStringSubstringReplacementBody(ctx, BRAZILIAN_PORTUGUESE_LEVELS_BT_REPLACEMENTS);
+    const tagPatched = replaceSwfTagBytesInBody(substringPatched.body, BRAZILIAN_PORTUGUESE_LEVELS_BT_REPLACEMENTS, true);
+    const changed = substringPatched.changed || tagPatched.changed;
+    return changed ? encodeSwfBuffer(ctx, tagPatched.body) : Buffer.from(fs.readFileSync(swfPath));
 }
 
 export function buildPortugueseUi4SwfBuffer(
@@ -2015,7 +2293,12 @@ function encodeSwfTag(tagType: number, data: Buffer): Buffer {
     return Buffer.concat([header, data]);
 }
 
-function replaceDefineSpriteTagBytes(data: Buffer, replacements: StringReplacement[], includeAbc = false): {
+function replaceDefineSpriteTagBytes(
+    data: Buffer,
+    replacements: StringReplacement[],
+    includeAbc = false,
+    structuredUi1EditText = false
+): {
     data: Buffer;
     changed: boolean;
     matched: string[];
@@ -2060,7 +2343,8 @@ function replaceDefineSpriteTagBytes(data: Buffer, replacements: StringReplaceme
             tagType,
             Buffer.from(data.subarray(dataStart, dataEnd)),
             replacements,
-            includeAbc
+            includeAbc,
+            structuredUi1EditText
         );
         chunks.push(encodeSwfTag(tagType, replaced.data));
         changed = replaced.changed || changed;
@@ -2086,7 +2370,8 @@ function replaceSwfTagDataBytes(
     tagType: number,
     data: Buffer,
     replacements: StringReplacement[],
-    includeAbc = false
+    includeAbc = false,
+    structuredUi1EditText = false
 ): {
     data: Buffer;
     changed: boolean;
@@ -2101,7 +2386,20 @@ function replaceSwfTagDataBytes(
     }
 
     if (tagType === 39) {
-        return replaceDefineSpriteTagBytes(data, replacements, includeAbc);
+        return replaceDefineSpriteTagBytes(data, replacements, includeAbc, structuredUi1EditText);
+    }
+
+    if (tagType === 37 && structuredUi1EditText) {
+        const patched = patchUi1EditText(data, replacements);
+        const fallback = replaceBytes(
+            patched.data,
+            getUi1SafeEditTextFallbackReplacements(replacements)
+        );
+        return {
+            data: fallback.data,
+            changed: patched.changed || fallback.changed,
+            matched: fallback.matched
+        };
     }
 
     if (tagType === 11 || tagType === 33 || tagType === 37) {
@@ -2356,7 +2654,75 @@ function patchUi4SpritePlacements(data: Buffer, spriteId: number): {
     return changed ? { data: Buffer.concat(chunks), changed } : { data, changed: false };
 }
 
-function patchUi1EditText(data: Buffer): {
+function readNullTerminatedUtf8(data: Buffer, start: number): { value: string; end: number } {
+    let end = start;
+    while (end < data.length && data[end] !== 0) {
+        end += 1;
+    }
+    return {
+        value: data.subarray(start, end).toString('utf8'),
+        end: Math.min(end + 1, data.length)
+    };
+}
+
+function replaceDefineEditTextInitialText(
+    data: Buffer,
+    replacements: StringReplacement[]
+): { data: Buffer; changed: boolean } {
+    const bounds = readSwfRect(data, 2);
+    let cursor = bounds.end;
+    const highFlags = data[cursor];
+    const lowFlags = data[cursor + 1];
+    cursor += 2;
+
+    const hasText = (highFlags & 0x80) !== 0;
+    const hasTextColor = (highFlags & 0x04) !== 0;
+    const hasMaxLength = (highFlags & 0x02) !== 0;
+    const hasFont = (highFlags & 0x01) !== 0;
+    const hasFontClass = (lowFlags & 0x80) !== 0;
+    const hasLayout = (lowFlags & 0x20) !== 0;
+
+    if (hasFont) {
+        cursor += 4;
+    }
+    if (hasFontClass) {
+        cursor = readNullTerminatedUtf8(data, cursor).end;
+    }
+    if (hasTextColor) {
+        cursor += 4;
+    }
+    if (hasMaxLength) {
+        cursor += 2;
+    }
+    if (hasLayout) {
+        cursor += 9;
+    }
+
+    const variableName = readNullTerminatedUtf8(data, cursor);
+    cursor = variableName.end;
+    if (!hasText || cursor > data.length) {
+        return { data, changed: false };
+    }
+
+    const initialText = readNullTerminatedUtf8(data, cursor);
+    const replacement = longestFirstReplacements(replacements)
+        .find((candidate) => candidate.oldValue === initialText.value);
+    if (!replacement) {
+        return { data, changed: false };
+    }
+
+    return {
+        data: Buffer.concat([
+            data.subarray(0, cursor),
+            Buffer.from(replacement.newValue, 'utf8'),
+            Buffer.from([0]),
+            data.subarray(initialText.end)
+        ]),
+        changed: true
+    };
+}
+
+function patchUi1EditText(data: Buffer, replacements: StringReplacement[]): {
     data: Buffer;
     changed: boolean;
 } {
@@ -2411,12 +2777,16 @@ function patchUi1EditText(data: Buffer): {
         }
     }
 
-    const replacements = UI1_DEFINE_EDIT_TEXT_REPLACEMENTS.get(characterId);
-    if (replacements) {
-        const replaced = replaceBytes(current, replacements);
+    const characterReplacements = UI1_DEFINE_EDIT_TEXT_REPLACEMENTS.get(characterId);
+    if (characterReplacements) {
+        const replaced = replaceDefineEditTextInitialText(current, characterReplacements);
         current = replaced.data;
         changed = replaced.changed || changed;
     }
+
+    const translated = replaceDefineEditTextInitialText(current, replacements);
+    current = translated.data;
+    changed = translated.changed || changed;
 
     return { data: current, changed };
 }
@@ -2560,6 +2930,10 @@ function getUi1AbcReplacements(replacements: StringReplacement[]): StringReplace
     return replacements.filter((replacement) => !UI1_TAG_ONLY_OLDVALUES.has(replacement.oldValue));
 }
 
+function getUi1SafeEditTextFallbackReplacements(replacements: StringReplacement[]): StringReplacement[] {
+    return replacements.filter((replacement) => !UI1_TAG_ONLY_OLDVALUES.has(replacement.oldValue));
+}
+
 export function buildPortugueseUi1SwfBuffer(
     swfPath: string,
     replacements: StringReplacement[]
@@ -2595,13 +2969,18 @@ export function buildPortugueseUi1SwfBuffer(
             changed = patched.changed || changed;
         }
         if (tagType === 37) {
-            const patched = patchUi1EditText(data);
+            const patched = patchUi1EditText(data, replacements);
             data = patched.data;
             changed = patched.changed || changed;
+            const fallback = replaceBytes(data, getUi1SafeEditTextFallbackReplacements(replacements));
+            data = fallback.data;
+            changed = fallback.changed || changed;
         }
-        const replaced = replaceSwfTagDataBytes(tagType, data, replacements);
-        data = replaced.data;
-        changed = replaced.changed || changed;
+        if (tagType !== 37) {
+            const replaced = replaceSwfTagDataBytes(tagType, data, replacements, false, true);
+            data = replaced.data;
+            changed = replaced.changed || changed;
+        }
 
         if (data.length < 0x3f) {
             const header = Buffer.alloc(2);
@@ -2910,8 +3289,10 @@ function buildBrazilianPortugueseEmotePatches(
     const menuCode = ctx.body.subarray(menuBody.codeStart, menuBody.codeStart + menuBody.codeLen);
     const legacyMenuInsertionOffset = 832;
     const legacyExpectedMenuInsertionBytes = Buffer.from([0x5d, 0x11]);
-    const dynamicMenuInsertionOffset = 424;
-    const dynamicExpectedMenuInsertionBytes = Buffer.from([0x62, 0x04, 0x62, 0x05]);
+    // In the current SWF, local 5 receives the normalized emote name at offset
+    // 413. Translate it before the menu object copies it into its text field.
+    const dynamicMenuInsertionOffset = 415;
+    const dynamicExpectedMenuInsertionBytes = Buffer.from([0x5d, 0x11]);
     const usesLegacyMenuLayout = menuCode
         .subarray(legacyMenuInsertionOffset, legacyMenuInsertionOffset + legacyExpectedMenuInsertionBytes.length)
         .equals(legacyExpectedMenuInsertionBytes);
@@ -2922,7 +3303,7 @@ function buildBrazilianPortugueseEmotePatches(
         throw new Error('class_127.method_1237 has an unexpected emote menu construction block');
     }
     const menuInsertionOffset = usesDynamicMenuLayout ? dynamicMenuInsertionOffset : legacyMenuInsertionOffset;
-    const menuLabelLocalRegister = usesDynamicMenuLayout ? 0x04 : 0x05;
+    const menuLabelLocalRegister = 0x05;
 
     const labelCodeChunks = [];
     for (const [source, label] of BRAZILIAN_PORTUGUESE_EMOTE_MENU_REPLACEMENTS) {
@@ -2975,8 +3356,10 @@ function buildBrazilianPortugueseEmotePatches(
     const commandCode = ctx.body.subarray(commandBody.codeStart, commandBody.codeStart + commandBody.codeLen);
     const legacyCommandInsertionOffset = 103;
     const legacyExpectedInsertionBytes = Buffer.from([0x60, 0x01]);
-    const dynamicCommandInsertionOffset = 340;
-    const dynamicExpectedInsertionBytes = Buffer.from([0x10]);
+    // Normalize translated aliases before the command parser branches into its
+    // validation/dispatch flow. Injecting at a later branch target gets skipped.
+    const dynamicCommandInsertionOffset = 222;
+    const dynamicExpectedInsertionBytes = Buffer.from([0x60]);
     const usesLegacyCommandLayout = commandCode
         .subarray(legacyCommandInsertionOffset, legacyCommandInsertionOffset + legacyExpectedInsertionBytes.length)
         .equals(legacyExpectedInsertionBytes);
@@ -2987,8 +3370,8 @@ function buildBrazilianPortugueseEmotePatches(
         throw new Error('class_127.method_1260 has an unexpected command parsing prologue');
     }
     const insertionOffset = usesDynamicCommandLayout ? dynamicCommandInsertionOffset : legacyCommandInsertionOffset;
-    const getCommandRegister = usesDynamicCommandLayout ? Buffer.from([0x62, 0x04]) : Buffer.from([0xd1]);
-    const setCommandRegister = usesDynamicCommandLayout ? Buffer.from([0x63, 0x04]) : Buffer.from([0x85, 0xd5]);
+    const getCommandRegister = Buffer.from([0xd1]);
+    const setCommandRegister = Buffer.from([0x85, 0xd5]);
 
     const aliasCodeChunks = [];
     for (const { alias, canonical } of BRAZILIAN_PORTUGUESE_EMOTE_COMMAND_ALIASES) {
@@ -3065,43 +3448,42 @@ function buildBrazilianPortugueseMainSwfDisciplineScreenLabelPatches(
     }
 
     const patches = [];
-    for (const { methodIdx, offset, expected } of BRAZILIAN_PORTUGUESE_MAIN_SWF_DISCIPLINE_SCREEN_LABEL_PATCHES) {
-        const methodBody = abc.methodBodies.get(methodIdx);
-        if (!methodBody) {
-            throw new Error(`DungeonBlitz.swf method ${methodIdx} body not found for PT-BR discipline screen labels`);
-        }
-
+    for (const [methodIdx, methodBody] of abc.methodBodies) {
         const code = ctx.body.subarray(methodBody.codeStart, methodBody.codeStart + methodBody.codeLen);
-        const instructions = new Map(disassemble(code, `m${methodIdx}`).map((instruction) => [instruction.offset, instruction]));
-        const instruction = instructions.get(offset);
-        if (!instruction || instruction.opcode !== 0x2c) {
-            throw new Error(`DungeonBlitz.swf method ${methodIdx} offset ${offset} is not the expected discipline screen pushstring`);
+        let instructions: ReturnType<typeof disassemble>;
+        try {
+            instructions = disassemble(code, `m${methodIdx}`);
+        } catch {
+            continue;
         }
 
-        const oldIndex = instruction.operands[0]?.[1];
-        if (abc.stringValues[oldIndex] !== expected) {
-            throw new Error(`DungeonBlitz.swf method ${methodIdx} offset ${offset} pushes unexpected string "${abc.stringValues[oldIndex]}"`);
-        }
+        for (const instruction of instructions) {
+            if (instruction.opcode !== 0x2c) {
+                continue;
+            }
 
-        const newValue = BRAZILIAN_PORTUGUESE_MAIN_SWF_DISCIPLINE_SCREEN_LABELS.get(expected);
-        if (!newValue) {
-            throw new Error(`Missing PT-BR discipline screen label for ${expected}`);
-        }
+            const oldIndex = instruction.operands[0]?.[1];
+            const oldValue = abc.stringValues[oldIndex];
+            const newValue = BRAZILIAN_PORTUGUESE_MAIN_SWF_DISCIPLINE_SCREEN_LABELS.get(oldValue);
+            if (!newValue) {
+                continue;
+            }
 
-        const replacementOperand = writeU30(internString(newValue));
-        const operandStart = methodBody.codeStart + instruction.offset + 1;
-        const operandEnd = methodBody.codeStart + instruction.offset + instruction.size;
-        if (replacementOperand.length !== operandEnd - operandStart) {
-            throw new Error(`PT-BR discipline mastery class label "${newValue}" changed pushstring operand width`);
-        }
+            const replacementOperand = writeU30(internString(newValue));
+            const operandStart = methodBody.codeStart + instruction.offset + 1;
+            const operandEnd = methodBody.codeStart + instruction.offset + instruction.size;
+            if (replacementOperand.length !== operandEnd - operandStart) {
+                throw new Error(`PT-BR discipline mastery class label "${newValue}" changed pushstring operand width`);
+            }
 
-        patches.push({
-            key: `ptbr-discipline-screen-label:${methodIdx}:${offset}`,
-            start: operandStart,
-            end: operandEnd,
-            data: replacementOperand,
-            detail: `localize displayed discipline screen label ${expected} -> ${newValue} without changing class identifiers`
-        });
+            patches.push({
+                key: `ptbr-discipline-screen-label:${methodIdx}:${instruction.offset}`,
+                start: operandStart,
+                end: operandEnd,
+                data: replacementOperand,
+                detail: `localize displayed discipline screen label ${oldValue} -> ${newValue} without changing class identifiers`
+            });
+        }
     }
 
     return patches;
@@ -3139,6 +3521,19 @@ function buildBrazilianPortugueseChatChannelLabelPatches(
         internString(value);
     }
 
+    const chatOwnedMethods = new Set<number>();
+    for (const instance of abc.instances) {
+        const className = abc.multinameNames[instance.classNameIdx];
+        if (className !== 'class_127' && className !== 'LinkUpdater') {
+            continue;
+        }
+        for (const trait of instance.traits) {
+            if (trait.methodIdx !== null) {
+                chatOwnedMethods.add(trait.methodIdx);
+            }
+        }
+    }
+
     const patches = [];
     for (const [methodIdx, methodBody] of abc.methodBodies) {
         const code = ctx.body.subarray(methodBody.codeStart, methodBody.codeStart + methodBody.codeLen);
@@ -3146,6 +3541,20 @@ function buildBrazilianPortugueseChatChannelLabelPatches(
         try {
             instructions = disassemble(code, `m${methodIdx}`);
         } catch {
+            continue;
+        }
+
+        const pushedStrings = new Set(
+            instructions
+                .filter((instruction) => instruction.opcode === 0x2c)
+                .map((instruction) => abc.stringValues[instruction.operands[0]?.[1] ?? 0])
+        );
+        const isCommandDispatcher =
+            [...BRAZILIAN_PORTUGUESE_CHAT_CHANNEL_LABELS.keys()].every((label) => pushedStrings.has(label)) &&
+            (pushedStrings.has('/guild') || instructions.some((instruction) =>
+                u30OperandName(instruction, abc.multinameNames) === 'PKTTYPE_SEND_CHAT_GUILD'
+            ));
+        if (!chatOwnedMethods.has(methodIdx) && !isCommandDispatcher) {
             continue;
         }
 
@@ -3369,6 +3778,58 @@ function buildBrazilianPortuguesePushStringOperandPatch(
     };
 }
 
+function buildBrazilianPortuguesePushStringFingerprintPatch(
+    ctx: ReturnType<typeof parseSwf>,
+    abc: ReturnType<typeof parseAbc>,
+    internString: StringInterner,
+    codeLen: number,
+    offset: number,
+    oldValue: string,
+    newValue: string,
+    key: string
+) {
+    const matches = [];
+    for (const [methodIdx, methodBody] of abc.methodBodies) {
+        if (methodBody.codeLen !== codeLen) {
+            continue;
+        }
+
+        const code = ctx.body.subarray(methodBody.codeStart, methodBody.codeStart + methodBody.codeLen);
+        const instruction = disassemble(code, `m${methodIdx}`).find((candidate) => candidate.offset === offset);
+        if (!instruction || instruction.opcode !== 0x2c) {
+            continue;
+        }
+
+        const oldIndex = instruction.operands[0]?.[1];
+        if (abc.stringValues[oldIndex] === oldValue) {
+            matches.push({ methodIdx, methodBody, instruction });
+        }
+    }
+
+    if (matches.length === 0) {
+        return null;
+    }
+    if (matches.length > 1) {
+        throw new Error(`PT-BR ${key} matched multiple DungeonBlitz.swf methods`);
+    }
+
+    const { methodIdx, methodBody, instruction } = matches[0];
+    const replacementOperand = writeU30(internString(newValue));
+    const operandStart = methodBody.codeStart + instruction.offset + 1;
+    const operandEnd = methodBody.codeStart + instruction.offset + instruction.size;
+    if (replacementOperand.length !== operandEnd - operandStart) {
+        throw new Error(`PT-BR item type label "${newValue}" changed pushstring operand width at m${methodIdx}:${offset}`);
+    }
+
+    return {
+        key: `${key}:m${methodIdx}:${offset}`,
+        start: operandStart,
+        end: operandEnd,
+        data: replacementOperand,
+        detail: `localize displayed PT-BR item type label ${oldValue} -> ${newValue}`
+    };
+}
+
 function buildBrazilianPortuguesePushDoubleOperandPatch(
     ctx: ReturnType<typeof parseSwf>,
     abc: ReturnType<typeof parseAbc>,
@@ -3406,6 +3867,53 @@ function buildBrazilianPortuguesePushDoubleOperandPatch(
     };
 }
 
+function buildBrazilianPortuguesePushDoubleFingerprintPatch(
+    ctx: ReturnType<typeof parseSwf>,
+    abc: ReturnType<typeof parseAbc>,
+    codeLen: number,
+    offset: number,
+    oldIndex: number,
+    newIndex: number,
+    key: string,
+    detail: string
+) {
+    const matches = [];
+    for (const [methodIdx, methodBody] of abc.methodBodies) {
+        if (methodBody.codeLen !== codeLen) {
+            continue;
+        }
+
+        const code = ctx.body.subarray(methodBody.codeStart, methodBody.codeStart + methodBody.codeLen);
+        const instruction = disassemble(code, `m${methodIdx}`).find((candidate) => candidate.offset === offset);
+        if (instruction?.opcode === 0x2f && instruction.operands[0]?.[1] === oldIndex) {
+            matches.push({ methodIdx, methodBody, instruction });
+        }
+    }
+
+    if (matches.length === 0) {
+        return null;
+    }
+    if (matches.length > 1) {
+        throw new Error(`PT-BR ${key} matched multiple DungeonBlitz.swf methods`);
+    }
+
+    const { methodIdx, methodBody, instruction } = matches[0];
+    const replacementOperand = writeU30(newIndex);
+    const operandStart = methodBody.codeStart + instruction.offset + 1;
+    const operandEnd = methodBody.codeStart + instruction.offset + instruction.size;
+    if (replacementOperand.length !== operandEnd - operandStart) {
+        throw new Error(`PT-BR UI positioning changed pushdouble operand width at m${methodIdx}:${offset}`);
+    }
+
+    return {
+        key: `${key}:m${methodIdx}:${offset}`,
+        start: operandStart,
+        end: operandEnd,
+        data: replacementOperand,
+        detail
+    };
+}
+
 function buildBrazilianPortugueseItemTypeLabelPatches(
     ctx: ReturnType<typeof parseSwf>,
     abc: ReturnType<typeof parseAbc>,
@@ -3417,121 +3925,121 @@ function buildBrazilianPortugueseItemTypeLabelPatches(
     }
 
     const patches = [
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            1998,
+            263,
             214,
             'Mount',
             'Montaria',
             'ptbr-item-type-label:mount-tooltip'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            2182,
+            202,
             178,
             'Pet Food',
             'Comida de Pet',
             'ptbr-item-type-label:pet-food-basic-tooltip'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            2008,
+            1246,
             965,
             'Mount',
             'Montaria',
             'ptbr-item-type-label:mount-armory-tooltip'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            1540,
+            147,
             69,
             'Catalyst',
             'Catalisador',
             'ptbr-item-type-label:catalyst-slot-tooltip'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            1540,
+            147,
             131,
             'Add Catalyst',
             'Adicionar Catalisador',
             'ptbr-catalyst-tooltip:add-label'
         ),
-        buildBrazilianPortuguesePushDoubleOperandPatch(
+        buildBrazilianPortuguesePushDoubleFingerprintPatch(
             ctx,
             abc,
-            1540,
+            147,
             134,
             42,
             104,
             'ptbr-catalyst-tooltip:x-position',
             'move the longer PT-BR catalyst tooltip label 11 px left'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            2321,
+            216,
             194,
             'Catalyst',
             'Catalisador',
             'ptbr-item-type-label:catalyst-inventory-tooltip'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            2246,
+            759,
             124,
             'Charm',
             'Gema',
             'ptbr-item-type-label:charm-inventory-tooltip'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            2246,
+            759,
             221,
             'Legendary Bonus',
             'Bônus Lendário',
             'ptbr-charm-tooltip:legendary-bonus'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            1520,
+            3147,
             81,
             'Crafting Materials',
             'Materiais de Criação',
             'ptbr-inventory-label:crafting-materials-title'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            3359,
+            4152,
             615,
             'Charms',
             'Gemas',
             'ptbr-inventory-label:charms-category'
         ),
-        buildBrazilianPortuguesePushStringOperandPatch(
+        buildBrazilianPortuguesePushStringFingerprintPatch(
             ctx,
             abc,
             internString,
-            3359,
+            4152,
             618,
             'Crafting Materials',
             'Materiais de Criação',
@@ -3547,7 +4055,7 @@ function buildBrazilianPortugueseItemTypeLabelPatches(
         ['Charms', 'Gemas']
     ]);
     const patchedOperands = new Set(patches.map((patch) => `${patch.start}:${patch.end}`));
-    for (const [methodIdx, methodBody] of abc.methodBodies) {
+    for (const [methodIdx, methodBody] of [] as Array<[number, NonNullable<ReturnType<typeof parseAbc>['methodBodies'] extends Map<number, infer T> ? T : never>]>) {
         const code = ctx.body.subarray(methodBody.codeStart, methodBody.codeStart + methodBody.codeLen);
         let instructions: ReturnType<typeof disassemble>;
         try {
@@ -3926,12 +4434,21 @@ export function buildDungeonBlitzSwfVariantBuffer(
     if (locale === 'pt-br' && isBrazilianPortugueseEmotePatchEnabled()) {
         patches.push(...buildBrazilianPortugueseEmotePatches(ctx, abc, internString));
     }
-    if (locale === 'pt-br') {
+    if (locale === 'pt-br' && isBrazilianPortugueseBytecodePatchGroupEnabled('DOOR_PLATE')) {
         patches.push(...buildBrazilianPortugueseDoorPlateLabelPatches(abc));
+        patches.push(...buildBrazilianPortugueseCompactDoorPlateNamePatches(ctx, abc, internString));
+    }
+    if (locale === 'pt-br' && isBrazilianPortugueseBytecodePatchGroupEnabled('DISCIPLINE_SCREEN')) {
         patches.push(...buildBrazilianPortugueseMainSwfDisciplineScreenLabelPatches(ctx, abc, internString));
+    }
+    if (locale === 'pt-br' && isBrazilianPortugueseBytecodePatchGroupEnabled('CHAT_CHANNEL')) {
         patches.push(...buildBrazilianPortugueseChatChannelLabelPatches(ctx, abc, internString));
         patches.push(...buildBrazilianPortugueseChatChannelMenuLayoutPatches(ctx, abc));
+    }
+    if (locale === 'pt-br' && isBrazilianPortugueseBytecodePatchGroupEnabled('CHAT_COMMAND_MENU')) {
         patches.push(...buildBrazilianPortugueseChatCommandMenuLabelPatches(ctx, abc, internString));
+    }
+    if (locale === 'pt-br' && isBrazilianPortugueseBytecodePatchGroupEnabled('ITEM_TYPE_LABELS')) {
         patches.push(...buildBrazilianPortugueseItemTypeLabelPatches(ctx, abc, internString));
     }
     patches.push(...buildAppendedStringPatches(abc, appendedStrings));

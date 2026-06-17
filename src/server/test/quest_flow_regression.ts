@@ -642,6 +642,36 @@ async function testMayorUsesJsonFallbackDialogueWhenNoQuestMatches(): Promise<vo
     );
 }
 
+async function testBellaSageswordUsesScriptedAmbientDialogue(): Promise<void> {
+    const client = createFakeClient('BridgeTown', {}, 0);
+    (client.character as any).dialogueLanguage = 'pt-br';
+
+    await NpcHandler.handleTalkToNpc(client as never, createNpcTalkPacket(2355488));
+
+    const bubblePacket = client.sentPackets.find((packet) => packet.id === 0x76);
+    assert.ok(bubblePacket, 'Bella should use a scripted ambient dialogue bubble');
+
+    const bubble = decodeNpcBubblePacket(bubblePacket!.payload);
+    assert.equal(bubble.npcId, 2355488);
+    assert.ok(
+        bubble.text.includes('=@Imagino que não?='),
+        'Bella scripted dialogue should include the first player response'
+    );
+    assert.ok(
+        bubble.text.includes('=@Posso dar uma olhada?='),
+        'Bella scripted dialogue should include the player request to inspect the gate'
+    );
+    assert.ok(
+        bubble.text.includes('=@Então, não?='),
+        'Bella scripted dialogue should include the final player response'
+    );
+    assert.equal(
+        client.sentPackets.some((packet) => packet.id === 0x7B),
+        false,
+        'Bella scripted ambient dialogue should not require a mission skit packet'
+    );
+}
+
 async function testMayorTurnInClaimsFindAnnasFatherThenOffersKeepQuestOnSecondTalk(): Promise<void> {
     const client = createFakeClient(
         'NewbieRoad',
@@ -1718,6 +1748,7 @@ async function main(): Promise<void> {
     await testCaptainFinkTurnInClaimsFirstThenOffersWashedAshoreOnSecondTalk();
     await testMayorTurnInClaimsWashedAshoreThenOffersRescueAnnaOnSecondTalk();
     await testMayorUsesJsonFallbackDialogueWhenNoQuestMatches();
+    await testBellaSageswordUsesScriptedAmbientDialogue();
     await testMayorTurnInClaimsFindAnnasFatherThenOffersKeepQuestOnSecondTalk();
     await testMayorTurnsInCompletedKeepQuest();
     await testMayorRepairsCompletedKeepQuestStillMarkedActive();

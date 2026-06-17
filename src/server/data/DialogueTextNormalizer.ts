@@ -18,12 +18,7 @@ function normalizeLocale(locale: string): string {
 }
 
 export function normalizeDialogueTextForClient(text: string, locale: string): string {
-    const normalizedLocale = normalizeLocale(locale);
-    if (normalizedLocale === 'pt-br') {
-        return text;
-    }
-
-    if (normalizedLocale !== 'tr') {
+    if (normalizeLocale(locale) !== 'tr') {
         return text;
     }
 

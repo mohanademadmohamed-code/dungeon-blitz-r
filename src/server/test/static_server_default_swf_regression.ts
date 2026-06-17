@@ -45,11 +45,12 @@ function alignBitCursor(cursor: BitCursor): void {
     }
 }
 
-function readSwfMatrix(data: Buffer, start: number): { tx: number; ty: number } {
+function readSwfMatrix(data: Buffer, start: number): { tx: number; ty: number; scaleX: number } {
     const cursor: BitCursor = { byte: start, bit: 0 };
+    let scaleX = 1;
     if (readUnsignedBits(data, cursor, 1) !== 0) {
         const scaleBits = readUnsignedBits(data, cursor, 5);
-        readSignedBits(data, cursor, scaleBits);
+        scaleX = readSignedBits(data, cursor, scaleBits) / 65536;
         readSignedBits(data, cursor, scaleBits);
     }
     if (readUnsignedBits(data, cursor, 1) !== 0) {
@@ -62,17 +63,17 @@ function readSwfMatrix(data: Buffer, start: number): { tx: number; ty: number } 
     const tx = readSignedBits(data, cursor, translateBits);
     const ty = readSignedBits(data, cursor, translateBits);
     alignBitCursor(cursor);
-    return { tx, ty };
+    return { tx, ty, scaleX };
 }
 
-function readSwfRect(data: Buffer, start: number): { xMax: number } {
+function readSwfRect(data: Buffer, start: number): { xMin: number; xMax: number } {
     const cursor: BitCursor = { byte: start, bit: 0 };
     const bitCount = readUnsignedBits(data, cursor, 5);
-    readSignedBits(data, cursor, bitCount);
+    const xMin = readSignedBits(data, cursor, bitCount);
     const xMax = readSignedBits(data, cursor, bitCount);
     readSignedBits(data, cursor, bitCount);
     readSignedBits(data, cursor, bitCount);
-    return { xMax };
+    return { xMin, xMax };
 }
 
 function collectDefineEditTextXMax(body: Buffer, targetIds: number[]): Map<number, number> {
@@ -104,6 +105,138 @@ function collectDefineEditTextXMax(body: Buffer, targetIds: number[]): Map<numbe
         if (tagType === 0) {
             break;
         }
+    }
+
+    return result;
+}
+
+function collectDefineEditTextBounds(body: Buffer, targetIds: number[]): Map<number, { xMin: number; xMax: number }> {
+    const result = new Map<number, { xMin: number; xMax: number }>();
+    const idSet = new Set(targetIds);
+    const nbits = body[0] >> 3;
+    let pos = Math.floor((5 + nbits * 4 + 7) / 8) + 4;
+
+    while (pos < body.length) {
+        const tagCodeAndLen = body.readUInt16LE(pos);
+        pos += 2;
+        const tagType = tagCodeAndLen >> 6;
+        let tagLen = tagCodeAndLen & 0x3f;
+        if (tagLen === 0x3f) {
+            tagLen = body.readUInt32LE(pos);
+            pos += 4;
+        }
+
+        const dataStart = pos;
+        const dataEnd = dataStart + tagLen;
+        if (tagType === 37) {
+            const characterId = body.readUInt16LE(dataStart);
+            if (idSet.has(characterId)) {
+                const bounds = readSwfRect(body, dataStart + 2);
+                result.set(characterId, { xMin: bounds.xMin, xMax: bounds.xMax });
+            }
+        }
+
+        pos = dataEnd;
+        if (tagType === 0) {
+            break;
+        }
+    }
+
+    return result;
+}
+
+function collectDefineEditTextFontHeights(body: Buffer, targetIds: number[]): Map<number, number> {
+    const result = new Map<number, number>();
+    const idSet = new Set(targetIds);
+    const nbits = body[0] >> 3;
+    let pos = Math.floor((5 + nbits * 4 + 7) / 8) + 4;
+
+    while (pos < body.length) {
+        const tagCodeAndLen = body.readUInt16LE(pos);
+        pos += 2;
+        const tagType = tagCodeAndLen >> 6;
+        let tagLen = tagCodeAndLen & 0x3f;
+        if (tagLen === 0x3f) {
+            tagLen = body.readUInt32LE(pos);
+            pos += 4;
+        }
+
+        const dataStart = pos;
+        const dataEnd = dataStart + tagLen;
+        if (tagType === 37) {
+            const characterId = body.readUInt16LE(dataStart);
+            if (idSet.has(characterId)) {
+                const boundsCursor: BitCursor = { byte: dataStart + 2, bit: 0 };
+                const rectBits = readUnsignedBits(body, boundsCursor, 5);
+                for (let index = 0; index < 4; index += 1) {
+                    readSignedBits(body, boundsCursor, rectBits);
+                }
+                alignBitCursor(boundsCursor);
+                let cursor = boundsCursor.byte;
+                const highFlags = body[cursor];
+                cursor += 2;
+                const hasFont = (highFlags & 0x01) !== 0;
+                if (hasFont) {
+                    cursor += 2;
+                    result.set(characterId, body.readUInt16LE(cursor));
+                }
+            }
+        }
+
+        pos = dataEnd;
+        if (tagType === 0) {
+            break;
+        }
+    }
+
+    return result;
+}
+
+function collectDefineEditTextVariableNames(body: Buffer): Map<number, string> {
+    const result = new Map<number, string>();
+    const nbits = body[0] >> 3;
+    let pos = Math.floor((5 + nbits * 4 + 7) / 8) + 4;
+
+    while (pos < body.length) {
+        const tagCodeAndLen = body.readUInt16LE(pos);
+        pos += 2;
+        const tagType = tagCodeAndLen >> 6;
+        let tagLen = tagCodeAndLen & 0x3f;
+        if (tagLen === 0x3f) {
+            tagLen = body.readUInt32LE(pos);
+            pos += 4;
+        }
+
+        const dataStart = pos;
+        const dataEnd = dataStart + tagLen;
+        if (tagType === 37) {
+            const characterId = body.readUInt16LE(dataStart);
+            const boundsCursor: BitCursor = { byte: dataStart + 2, bit: 0 };
+            const rectBits = readUnsignedBits(body, boundsCursor, 5);
+            for (let index = 0; index < 4; index += 1) {
+                readSignedBits(body, boundsCursor, rectBits);
+            }
+            alignBitCursor(boundsCursor);
+
+            let cursor = boundsCursor.byte;
+            const highFlags = body[cursor];
+            const lowFlags = body[cursor + 1];
+            cursor += 2;
+            if (highFlags & 0x01) cursor += 4;
+            if (lowFlags & 0x80) {
+                while (cursor < dataEnd && body[cursor++] !== 0) {}
+            }
+            if (highFlags & 0x04) cursor += 4;
+            if (highFlags & 0x02) cursor += 2;
+            if (lowFlags & 0x20) cursor += 9;
+
+            const nameStart = cursor;
+            while (cursor < dataEnd && body[cursor] !== 0) cursor += 1;
+            result.set(characterId, body.subarray(nameStart, cursor).toString('utf8'));
+        }
+
+        pos = dataEnd;
+        if (tagType === 0) break;
     }
 
     return result;
@@ -150,8 +283,8 @@ function collectSpriteCharacterPlacements(
     body: Buffer,
     targetSpriteId: number,
     characterIds: number[]
-): Map<number, { tx: number; ty: number }> {
-    const result = new Map<number, { tx: number; ty: number }>();
+): Map<number, { tx: number; ty: number; scaleX: number }> {
+    const result = new Map<number, { tx: number; ty: number; scaleX: number }>();
     const idSet = new Set(characterIds);
     const nbits = body[0] >> 3;
     let pos = Math.floor((5 + nbits * 4 + 7) / 8) + 4;
@@ -220,7 +353,7 @@ function testStaticServerServesSingleSwfByDefault(): void {
     const selectedSwfUrl = (server as any).getSelectedSwfUrl() as string;
 
     assert.equal(path.basename(selectedSwfPath), 'DungeonBlitz.swf');
-    assert.equal(selectedSwfUrl, '/p/cbp/DungeonBlitz.swf?fv=cdb&gv=cdb');
+    assert.equal(selectedSwfUrl, '/p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl');
     assert.equal(fs.existsSync(selectedSwfPath), true);
 }
 
@@ -232,7 +365,7 @@ function testStaticServerCanonicalizesDirectSwfVersionParams(): void {
         socket: { remoteAddress: '127.0.0.1' }
     };
     const canonicalRequest = {
-        query: { fv: 'cdb', gv: 'cdb' },
+        query: { fv: 'cdl', gv: 'cdl' },
         headers: {},
         socket: { remoteAddress: '127.0.0.1' }
     };
@@ -241,7 +374,7 @@ function testStaticServerCanonicalizesDirectSwfVersionParams(): void {
     assert.equal((server as any).isCanonicalSelectedSwfRequest(canonicalRequest), true);
     assert.equal(
         (server as any).getCanonicalSelectedSwfUrl(staleRequest),
-        '/p/cbp/DungeonBlitz.swf?fv=cdb&gv=cdb&lang=tr'
+        '/p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl&lang=tr'
     );
 }
 
@@ -275,7 +408,7 @@ function testStaticServerAliasesVersionedGameSwzRequests(): void {
         return layer.route?.path === '/p/:assetVersion/Game.swz';
     });
 
-    assert.ok(gameSwzRoute, 'Static server should alias versioned Game.swz requests such as /p/cdb/Game.swz');
+    assert.ok(gameSwzRoute, 'Static server should alias versioned Game.swz requests such as /p/cdl/Game.swz');
     assert.equal(gameSwzRoute.route?.methods?.get, true);
 }
 
@@ -318,15 +451,6 @@ function testStaticServerResolvesPortugueseGameSwzGenderFromSession(): void {
         headers: {},
         socket: { remoteAddress: '127.0.0.1' }
     };
-    const portuguesePath = (server as any).getGameSwzPathForLocale('pt-br') as string;
-    const baseMissionTypes = decodeSwzEntries(fs.readFileSync(portuguesePath)).get('MissionTypes') ?? '';
-
-    assert.equal(
-        baseMissionTypes.includes('Retorne vitorioso|vitoriosa a Felbridge'),
-        true,
-        'Base PT-BR Game.swz should keep gender markers before the request-specific resolver runs'
-    );
-
     GlobalState.sessionsByToken.set(424242, {
         socket: { remoteAddress: '127.0.0.1' },
         playerSpawned: true,
@@ -344,12 +468,43 @@ function testStaticServerResolvesPortugueseGameSwzGenderFromSession(): void {
     }
 }
 
+function testStaticServerResolvesPortugueseGameSwzGenderToMaleFallback(): void {
+    const server = new StaticServer();
+    const request = {
+        query: { lang: 'pt-br' },
+        headers: {},
+        socket: { remoteAddress: '127.0.0.1' }
+    };
+    const resolvedBuffer = (server as any).getGameSwzBufferForRequest(request, 'pt-br') as Buffer | null;
+    assert.ok(resolvedBuffer, 'PT-BR Game.swz should be rebuilt even before the player gender is known');
+    const resolvedMissionTypes = decodeSwzEntries(resolvedBuffer).get('MissionTypes') ?? '';
+
+    assert.equal(resolvedMissionTypes.includes('Retorne vitorioso a Felbridge'), true);
+    assert.equal(resolvedMissionTypes.includes('Retorne vitorioso|vitoriosa a Felbridge'), false);
+}
+
+function testStaticServerResolvesPortugueseGameSwzGenderFromCookie(): void {
+    const server = new StaticServer();
+    const request = {
+        query: { lang: 'pt-br' },
+        headers: { cookie: 'db_lang=pt-br; db_gender=female' },
+        socket: { remoteAddress: '127.0.0.1' }
+    };
+    const resolvedBuffer = (server as any).getGameSwzBufferForRequest(request, 'pt-br') as Buffer | null;
+    assert.ok(resolvedBuffer, 'PT-BR Game.swz should use persisted gender cookie before a socket session exists');
+    const resolvedMissionTypes = decodeSwzEntries(resolvedBuffer).get('MissionTypes') ?? '';
+
+    assert.equal(resolvedMissionTypes.includes('Retorne vitoriosa a Felbridge'), true);
+    assert.equal(resolvedMissionTypes.includes('Retorne vitorioso a Felbridge'), false);
+    assert.equal(resolvedMissionTypes.includes('Retorne vitorioso|vitoriosa a Felbridge'), false);
+}
+
 function testStaticServerResolvesPortugueseGameSwzGenderFromRequestReferrer(): void {
     const server = new StaticServer();
     const request = {
         query: { lang: 'pt-br' },
         headers: {
-            referer: 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdb&gv=cdb&lang=pt-br&gender=female'
+            referer: 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl&lang=pt-br&gender=female'
         },
         socket: { remoteAddress: '127.0.0.1' }
     };
@@ -412,14 +567,14 @@ function testStaticServerLocalizesPortugueseLevelTypesXml(): void {
     assert.equal(portugueseXml.includes('<DisplayName>dehset Rising Damned</DisplayName>'), false);
 }
 
-function testStaticServerRelocatesPortugueseSealWispsThought(): void {
+function testStaticServerPreservesPortugueseSealWispsThought(): void {
     const server = new StaticServer();
     const missionTypesPath = (server as any).getSharedXmlAssetPath('/MissionTypes.xml') as string;
     const englishXml = ((server as any).getLocalizedXmlBuffer(missionTypesPath, 'en') as Buffer).toString('utf8');
     const portugueseXml = ((server as any).getLocalizedXmlBuffer(missionTypesPath, 'pt-br') as Buffer).toString('utf8');
 
     assert.equal(englishXml.includes('<ISayOnAccept>^tI need to seal off the wisps</ISayOnAccept>'), true);
-    assert.equal(portugueseXml.includes('<ISayOnAccept>^tI need to seal off the wisps</ISayOnAccept>'), false);
+    assert.equal(portugueseXml.includes('<ISayOnAccept>^tI need to seal off the wisps</ISayOnAccept>'), true);
 }
 
 function testBrowserEmbedFillsViewportWithoutCropping(): void {
@@ -451,8 +606,14 @@ function testBrowserEmbedFillsViewportWithoutCropping(): void {
     assert.equal(indexHtml.includes('syncGameStageSize'), false, 'Flash host must not run edge-offset canvas resync logic');
     assert.equal(/swfobject\.embedSWF\([\s\S]*"100%",\s*\r?\n\s*"100%"/.test(indexHtml), true, 'DungeonBlitz SWF must fill the centered fitted viewport');
     assert.equal(/swfobject\.embedSWF\([\s\S]*"1152",\s*\r?\n\s*"768"/.test(indexHtml), false, 'DungeonBlitz SWF must not force an oversized authored viewport in short FlashBrowser windows');
-    assert.equal(indexHtml.includes('DungeonBlitz.swf?fv=cdb&gv=cdb'), true, 'Flash host must request the current cache-busted SWF URL');
-    assert.equal(indexHtml.includes('{ fv: "cdb", gv: "cdb" }'), true, 'Flash vars must match the current cache-busted SWF URL');
+    assert.equal(indexHtml.includes('DungeonBlitz.swf?fv=cdl&gv=cdl'), true, 'Flash host must request the current cache-busted SWF URL');
+    assert.equal(indexHtml.includes('{ fv: "cdl", gv: "cdl" }'), true, 'Flash vars must match the current cache-busted SWF URL');
+    assert.equal(indexHtml.includes('db_gender'), true, 'Flash host must persist PT-BR player gender for Game.swz tracker resolution');
+    assert.equal(indexHtml.includes('selectedLanguage'), true, 'Flash host must reuse saved language when booting without a query string');
+    assert.equal(indexHtml.includes('session.characterGender'), true, 'Flash host must observe live character gender changes');
+    assert.equal(indexHtml.includes('nextUrl.searchParams.set("lang", "pt-br")'), true, 'Flash host must preserve PT-BR when reloading for gender-aware Game.swz');
+    assert.equal(indexHtml.includes('nextUrl.searchParams.set("gender", sessionGender)'), true, 'Flash host must put the live player gender in the reload URL');
+    assert.equal(indexHtml.includes('window.location.replace(nextUrl.toString())'), true, 'Flash host must reload Game.swz with an explicit PT-BR gender URL');
 }
 
 function testStaticServerResolvesGameSwzLocaleFromRequest(): void {
@@ -537,6 +698,27 @@ function testStaticServerRemembersQueryLocaleInCookie(): void {
     assert.equal(cookies[0]?.options.path, '/');
 }
 
+function testStaticServerRemembersRequestGenderInCookie(): void {
+    const server = new StaticServer();
+    const cookies: Array<{ name: string; value: string; options: Record<string, unknown> }> = [];
+    const req = {
+        query: { gender: 'Female' },
+        headers: {}
+    };
+    const res = {
+        cookie(name: string, value: string, options: Record<string, unknown>) {
+            cookies.push({ name, value, options });
+        }
+    };
+
+    (server as any).rememberRequestGender(req, res);
+
+    assert.equal(cookies.length, 1);
+    assert.equal(cookies[0]?.name, 'db_gender');
+    assert.equal(cookies[0]?.value, 'female');
+    assert.equal(cookies[0]?.options.path, '/');
+}
+
 function testStaticServerBuildsLocalizedSwfTextByLocale(): void {
     const server = new StaticServer();
     const englishBody = getSwfBody((server as any).getSelectedSwfBuffer('en') as Buffer);
@@ -549,17 +731,28 @@ function testStaticServerBuildsLocalizedSwfTextByLocale(): void {
     assert.equal(englishBody.includes(turkishDiscipline), false);
     assert.equal(turkishBody.includes(englishDiscipline), false);
     assert.equal(turkishBody.includes(turkishDiscipline), true);
+    assert.equal(portugueseBody.equals(englishBody), false);
+    assertBodyIncludesText(portugueseBody, 'UI_1.swf', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'UI_2.swf', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'DB_LOCALIZATION_RELOAD:', 'DungeonBlitz.swf pt-br');
+    assertBodyExcludesText(portugueseBody, `UI_1.swf?rv=${SWF_RUNTIME_VERSION}`, 'DungeonBlitz.swf pt-br');
+    assertBodyExcludesText(portugueseBody, `UI_2.swf?rv=${SWF_RUNTIME_VERSION}`, 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'Oficiais', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'Montaria', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'UI_1.swf', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, `UI_4.swf?rv=${SWF_RUNTIME_VERSION}`, 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'UI_2.swf', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'DB_LOCALIZATION_RELOAD:', 'DungeonBlitz.swf pt-br');
-    assertBodyIncludesText(portugueseBody, 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cbz&gv=cbx&lang=pt-br', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'http://localhost:8000/p/cbp/DungeonBlitz.swf?fv=cdl&gv=cdl&lang=pt-br', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Nível da Masmorra: ', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Limpe a Masmorra', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Missão Disponível', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Missão Completa', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Capitão Fink', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Intendente', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'Guardião', 'DungeonBlitz.swf pt-br');
+    assertBodyExcludesText(portugueseBody, 'Guardião Maximilian', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'Guarda Gunter', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Bem-vindo a ', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Melhorar Construção', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(
@@ -590,8 +783,20 @@ function testStaticServerBuildsLocalizedSwfTextByLocale(): void {
     assertBodyIncludesText(portugueseBody, 'Não há jogadores nesta área.', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, '/conv <player>', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Convidar...', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'Acenar', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'Celebrar', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'Dancar', 'DungeonBlitz.swf pt-br');
+    assertBodyIncludesText(portugueseBody, 'Ausente', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Viajar para', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Masmorra', 'DungeonBlitz.swf pt-br');
+    for (const compactDoorPlateName of [
+        'Tumba de Lorde Hugh Tilly',
+        'Tumba de Lorde Peter Tilly',
+        'Tumba de Sir Edmund Tilly'
+    ]) {
+        assertBodyIncludesText(portugueseBody, compactDoorPlateName, 'DungeonBlitz.swf pt-br');
+        assertBodyExcludesText(englishBody, compactDoorPlateName, 'DungeonBlitz.swf en');
+    }
     assertBodyIncludesText(portugueseBody, 'Oficiais', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Guilda', 'DungeonBlitz.swf pt-br');
     assertBodyIncludesText(portugueseBody, 'Grupo', 'DungeonBlitz.swf pt-br');
@@ -642,9 +847,11 @@ function assertBodyExcludesText(body: Buffer, text: string, label: string): void
 function testStaticServerLocalizesPortugueseTutorialAssetTags(): void {
     const server = new StaticServer();
     const uiBody = getSwfBody((server as any).getLocalizedAssetSwfBuffer('p/cbp/UI_1.swf', 'pt-br') as Buffer);
+    const sourceUiBody = getSwfBody(fs.readFileSync(path.resolve(__dirname, '../../client/content/localhost/p/cbp/UI_1.swf')));
     const ui4Body = getSwfBody((server as any).getLocalizedAssetSwfBuffer('p/cbp/UI_4.swf', 'pt-br') as Buffer);
     const homeLevelsBody = getSwfBody((server as any).getLocalizedAssetSwfBuffer('p/cbp/LevelsHome.swf', 'pt-br') as Buffer);
     const levelsBody = getSwfBody((server as any).getLocalizedAssetSwfBuffer('p/cbp/LevelsNR.swf', 'pt-br') as Buffer);
+    const felbridgeLevelsBody = getSwfBody((server as any).getLocalizedAssetSwfBuffer('p/cam/LevelsBT.swf', 'pt-br') as Buffer);
     const tutorialLevelsBody = getSwfBody((server as any).getLocalizedAssetSwfBuffer('p/cbp/LevelsTut.swf', 'pt-br') as Buffer);
     const cemeteryPortugueseBody = getSwfBody((server as any).getLocalizedAssetSwfBuffer('p/cam/LevelsCH.swf', 'pt-br') as Buffer);
     const cemeteryEnglishBody = getSwfBody((server as any).getLocalizedAssetSwfBuffer('p/cam/LevelsCH.swf', 'en') as Buffer);
@@ -665,6 +872,10 @@ function testStaticServerLocalizesPortugueseTutorialAssetTags(): void {
     assertBodyIncludesText(cemeteryPortugueseBody, 'Nephit, o Grande e Sábio', 'LevelsCH.swf pt-br');
     assertBodyIncludesText(cemeteryPortugueseBody, 'Nephit, o Terrível', 'LevelsCH.swf pt-br');
     assertBodyIncludesText(cemeteryPortugueseBody, 'Lorde Tilly', 'LevelsCH.swf pt-br');
+    assertBodyIncludesText(felbridgeLevelsBody, 'Tessa, a Grande Bruxa', 'LevelsBT.swf pt-br');
+    assertBodyIncludesText(felbridgeLevelsBody, 'Crias de Meylour, venham!', 'LevelsBT.swf pt-br');
+    assertBodyIncludesText(felbridgeLevelsBody, 'É hora de acabar com o Intendente e quem quer que sejam seus aliados.', 'LevelsBT.swf pt-br');
+    assertBodyExcludesText(felbridgeLevelsBody, 'Time to put an end to the Steward and whoever is in league with him', 'LevelsBT.swf pt-br');
     assertBodyExcludesText(cemeteryPortugueseBody, 'Kamak the Packlord', 'LevelsCH.swf pt-br');
     assertBodyExcludesText(cemeteryPortugueseBody, 'Rafhiu the Liberator', 'LevelsCH.swf pt-br');
     assertBodyExcludesText(cemeteryPortugueseBody, 'Ravenous Drake', 'LevelsCH.swf pt-br');
@@ -768,11 +979,11 @@ function testStaticServerLocalizesPortugueseTutorialAssetTags(): void {
     assertBodyIncludesText(ui4Body, 'Reforjar', 'UI_4.swf');
     assert.deepEqual(
         collectSpriteCharacterPlacements(ui4Body, 2948, [2947]).get(2947),
-        { tx: -441, ty: -216 }
+        { tx: -441, ty: -216, scaleX: 1 }
     );
     assert.deepEqual(
         collectSpriteCharacterPlacements(ui4Body, 3953, [3952]).get(3952),
-        { tx: -168, ty: 205 }
+        { tx: -168, ty: 205, scaleX: 1 }
     );
     assertBodyExcludesText(ui4Body, 'The Magic Forge', 'UI_4.swf');
     assertBodyExcludesText(ui4Body, 'Visit House', 'UI_4.swf');
@@ -871,9 +1082,23 @@ function testStaticServerLocalizesPortugueseTutorialAssetTags(): void {
     assertBodyExcludesText(uiBody, 'TOTAL SCORE', 'UI_1.swf');
     assertBodyExcludesText(uiBody, 'View Ranks', 'UI_1.swf');
     assertBodyExcludesText(uiBody, 'Pantano da Rosa Negra', 'UI_1.swf');
+    for (const identifier of ['am_FriendsPanel', 'am_GuildPanel', 'am_ZonePanel', 'am_IgnorePanel']) {
+        assertBodyIncludesText(uiBody, identifier, 'UI_1.swf');
+    }
+    for (const translatedIdentifier of ['am_AmigosPanel', 'am_GuildaPanel', 'am_ZonaPanel', 'am_IgnoradosPanel']) {
+        assertBodyExcludesText(uiBody, translatedIdentifier, 'UI_1.swf');
+    }
 
-    const cardTitleBounds = collectDefineEditTextXMax(uiBody, [85, 179, 180, 187, 431, 439, 482, 485, 493, 556, 558, 560, 625, 1109, 1125, 1134, 1136, 1139, 1141, 1271, 1272, 1287, 1288, 1289, 1290, 1291, 1303, 1305, 2581, 2594, 2617]);
-    assert.ok(Number(cardTitleBounds.get(85) ?? 0) >= 4400);
+    const sourceVariableNames = collectDefineEditTextVariableNames(sourceUiBody);
+    const localizedVariableNames = collectDefineEditTextVariableNames(uiBody);
+    assert.deepEqual(
+        localizedVariableNames,
+        sourceVariableNames,
+        'PT-BR UI_1.swf localization must preserve DefineEditText variable names'
+    );
+
+    const cardTitleBounds = collectDefineEditTextXMax(uiBody, [85, 179, 180, 187, 431, 439, 482, 485, 493, 556, 558, 560, 625, 1109, 1125, 1134, 1135, 1136, 1139, 1140, 1141, 1149, 1163, 1271, 1272, 1287, 1288, 1289, 1290, 1291, 1303, 1305, 2581, 2594, 2617]);
+    assert.ok(Number(cardTitleBounds.get(85) ?? 0) >= 5600);
     assert.ok(Number(cardTitleBounds.get(179) ?? 0) > 0);
     assert.ok(Number(cardTitleBounds.get(179) ?? 0) >= 6400);
     assert.ok(Number(cardTitleBounds.get(180) ?? 0) >= 8000);
@@ -888,12 +1113,48 @@ function testStaticServerLocalizesPortugueseTutorialAssetTags(): void {
     assert.ok(Number(cardTitleBounds.get(558) ?? 0) >= 7200);
     assert.ok(Number(cardTitleBounds.get(560) ?? 0) >= 7200);
     assert.ok(Number(cardTitleBounds.get(625) ?? 0) >= 5100);
-    assert.ok(Number(cardTitleBounds.get(1109) ?? 0) >= 6500);
-    assert.ok(Number(cardTitleBounds.get(1125) ?? 0) >= 6500);
-    assert.ok(Number(cardTitleBounds.get(1134) ?? 0) >= 6500);
-    assert.ok(Number(cardTitleBounds.get(1136) ?? 0) >= 3300);
-    assert.ok(Number(cardTitleBounds.get(1139) ?? 0) >= 6500);
-    assert.ok(Number(cardTitleBounds.get(1141) ?? 0) >= 3300);
+    assert.ok(Number(cardTitleBounds.get(1109) ?? 0) >= 9000);
+    assert.ok(Number(cardTitleBounds.get(1125) ?? 0) >= 9000);
+    assert.ok(Number(cardTitleBounds.get(1134) ?? 0) >= 9000);
+    assert.ok(Number(cardTitleBounds.get(1135) ?? 0) <= 3200);
+    assert.ok(Number(cardTitleBounds.get(1136) ?? 0) >= 6500);
+    assert.ok(Number(cardTitleBounds.get(1139) ?? 0) >= 9000);
+    assert.ok(Number(cardTitleBounds.get(1140) ?? 0) <= 3200);
+    assert.ok(Number(cardTitleBounds.get(1141) ?? 0) >= 6500);
+    assert.ok(Number(cardTitleBounds.get(1149) ?? 0) >= 11000);
+    assert.ok(Number(cardTitleBounds.get(1163) ?? 0) >= 11000);
+    const ui1FontHeights = collectDefineEditTextFontHeights(uiBody, [1136, 1141]);
+    assert.ok(Number(ui1FontHeights.get(1136) ?? 0) <= 330);
+    assert.ok(Number(ui1FontHeights.get(1141) ?? 0) <= 330);
+    for (const [spriteId, characterId, depthLabel] of [
+        [1121, 1109, 'legacy left'],
+        [1129, 1125, 'legacy right'],
+        [1137, 1134, 'left'],
+        [1142, 1139, 'right']
+    ] as const) {
+        const placement = collectSpriteCharacterPlacements(uiBody, spriteId, [characterId]).get(characterId);
+        assert.equal(Number(placement?.scaleX ?? 0), 1, `UI_1.swf ${depthLabel} map quest title should keep stock scale unless specifically requested`);
+    }
+    const legacyLeftQuestProgress = collectSpriteCharacterPlacements(uiBody, 1121, [1107]).get(1107);
+    assert.equal(Number(legacyLeftQuestProgress?.scaleX ?? 0), 1, 'UI_1.swf legacy left quest progress text should not be compressed for PT-BR');
+    assert.equal(Number(legacyLeftQuestProgress?.tx ?? 0), -6585, 'UI_1.swf legacy left quest progress text should keep its original position for PT-BR');
+    const legacyLeftQuestProgressChip = collectSpriteCharacterPlacements(uiBody, 1121, [1108]).get(1108);
+    assert.equal(Number(legacyLeftQuestProgressChip?.tx ?? 0), 0, 'UI_1.swf legacy left quest progress chip should keep its original position for PT-BR');
+    const legacyLeftNpcName = collectSpriteCharacterPlacements(uiBody, 1121, [1110]).get(1110);
+    assert.equal(Number(legacyLeftNpcName?.scaleX ?? 0), 1, 'UI_1.swf legacy left quest NPC name should keep the stock layout unless specifically patched');
+    assert.equal(Number(legacyLeftNpcName?.tx ?? 0), -4142, 'UI_1.swf legacy left quest NPC name should keep the stock position unless specifically patched');
+    const legacyRightQuestProgress = collectSpriteCharacterPlacements(uiBody, 1129, [1123]).get(1123);
+    assert.equal(Number(legacyRightQuestProgress?.scaleX ?? 0), 1, 'UI_1.swf legacy right quest progress text should not be compressed for PT-BR');
+    assert.equal(Number(legacyRightQuestProgress?.tx ?? 0), 1195, 'UI_1.swf legacy right quest progress text should keep its original position for PT-BR');
+    const legacyRightQuestProgressChip = collectSpriteCharacterPlacements(uiBody, 1129, [1124]).get(1124);
+    assert.equal(Number(legacyRightQuestProgressChip?.tx ?? 0), 0, 'UI_1.swf legacy right quest progress chip should keep its original position for PT-BR');
+    const legacyRightNpcName = collectSpriteCharacterPlacements(uiBody, 1129, [1126]).get(1126);
+    assert.equal(Number(legacyRightNpcName?.scaleX ?? 0), 1, 'UI_1.swf legacy right quest NPC name should keep the stock layout unless specifically patched');
+    assert.equal(Number(legacyRightNpcName?.tx ?? 0), 3638, 'UI_1.swf legacy right quest NPC name should keep the stock position unless specifically patched');
+    const completedDungeonPlacement = collectSpriteCharacterPlacements(uiBody, 1159, [1149]).get(1149);
+    assert.equal(Number(completedDungeonPlacement?.scaleX ?? 0), 1, 'UI_1.swf completed dungeon map title should keep stock scale unless specifically requested');
+    const mirroredCompletedDungeonPlacement = collectSpriteCharacterPlacements(uiBody, 1167, [1163]).get(1163);
+    assert.equal(Number(mirroredCompletedDungeonPlacement?.scaleX ?? 0), 1, 'UI_1.swf mirrored completed dungeon map title should keep stock scale unless specifically requested');
     assert.ok(Number(cardTitleBounds.get(1271) ?? 0) >= 3800);
     assert.ok(Number(cardTitleBounds.get(1272) ?? 0) >= 1600);
     assert.ok(Number(cardTitleBounds.get(1287) ?? 0) >= 1600);
@@ -906,7 +1167,7 @@ function testStaticServerLocalizesPortugueseTutorialAssetTags(): void {
     assert.ok(Number(cardTitleBounds.get(2581) ?? 0) >= 2600);
     assert.ok(Number(cardTitleBounds.get(2594) ?? 0) >= 2200);
     assert.ok(Number(cardTitleBounds.get(2617) ?? 0) >= 2600);
-    const ui4TooltipBounds = collectDefineEditTextXMax(ui4Body, [375, 592, 598, 644, 645, 655, 656, 666, 667, 688, 689, 1001, 1015, 1702, 2019, 2023, 2027, 2038, 2320, 3952, 4000]);
+    const ui4TooltipBounds = collectDefineEditTextXMax(ui4Body, [375, 592, 598, 644, 645, 655, 656, 666, 667, 688, 689, 1001, 1015, 1140, 1702, 2019, 2023, 2027, 2038, 2320, 3952, 4000]);
     assert.ok(Number(ui4TooltipBounds.get(375) ?? 0) >= 8400);
     assert.ok(Number(ui4TooltipBounds.get(592) ?? 0) >= 3900);
     assert.ok(Number(ui4TooltipBounds.get(598) ?? 0) >= 3900);
@@ -920,6 +1181,7 @@ function testStaticServerLocalizesPortugueseTutorialAssetTags(): void {
     assert.ok(Number(ui4TooltipBounds.get(689) ?? 0) >= 8200);
     assert.ok(Number(ui4TooltipBounds.get(1001) ?? 0) >= 7600);
     assert.ok(Number(ui4TooltipBounds.get(1015) ?? 0) >= 7600);
+    assert.ok(Number(ui4TooltipBounds.get(1140) ?? 0) >= 4150);
     assert.ok(Number(ui4TooltipBounds.get(1702) ?? 0) >= 3200);
     assert.ok(Number(ui4TooltipBounds.get(2019) ?? 0) >= 3200);
     assert.ok(Number(ui4TooltipBounds.get(2023) ?? 0) >= 4600);
@@ -928,6 +1190,8 @@ function testStaticServerLocalizesPortugueseTutorialAssetTags(): void {
     assert.ok(Number(ui4TooltipBounds.get(2320) ?? 0) >= 8200);
     assert.ok(Number(ui4TooltipBounds.get(3952) ?? 0) >= 4080);
     assert.ok(Number(ui4TooltipBounds.get(4000) ?? 0) >= 8200);
+    const ui4TrackerBounds = collectDefineEditTextBounds(ui4Body, [1140]);
+    assert.deepEqual(ui4TrackerBounds.get(1140), { xMin: -120, xMax: 4150 });
     const talentTrainingTitlePlacement = collectSpriteCharacterPlacements(ui4Body, 4001, [4000]).get(4000);
     assert.equal(talentTrainingTitlePlacement?.tx, -861);
 
@@ -973,15 +1237,18 @@ function main(): void {
     testStaticServerSelectsLocalizedGameSwz();
     testStaticServerAliasesVersionedGameSwzRequests();
     testStaticServerResolvesPortugueseGameSwzGenderFromSession();
+    testStaticServerResolvesPortugueseGameSwzGenderToMaleFallback();
+    testStaticServerResolvesPortugueseGameSwzGenderFromCookie();
     testStaticServerResolvesPortugueseGameSwzGenderFromRequestReferrer();
     testStaticServerAliasesCurrentFlashVersionManifest();
     testStaticServerLocalizesPortugueseTooltipXml();
     testStaticServerLocalizesPortugueseEntTypesXml();
     testStaticServerLocalizesPortugueseLevelTypesXml();
-    testStaticServerRelocatesPortugueseSealWispsThought();
+    testStaticServerPreservesPortugueseSealWispsThought();
     testBrowserEmbedFillsViewportWithoutCropping();
     testStaticServerResolvesGameSwzLocaleFromRequest();
     testStaticServerRemembersQueryLocaleInCookie();
+    testStaticServerRemembersRequestGenderInCookie();
     testStaticServerBuildsLocalizedSwfTextByLocale();
     testStaticServerLocalizesPortugueseTutorialAssetTags();
     console.log('static_server_default_swf_regression: ok');
