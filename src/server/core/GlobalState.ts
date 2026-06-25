@@ -50,6 +50,34 @@ export type SharedDungeonProgressState = {
     }>;
 };
 
+export type SharedDungeonCutsceneState = {
+    roomId: number;
+    ownerToken: number;
+    active: boolean;
+    completed: boolean;
+    startedAt: number;
+    endedAt: number;
+};
+
+export type DeadHostileTombstone = {
+    canonicalId: number;
+    spawnKey: string;
+    levelScope: string;
+    levelName: string;
+    roomId: number;
+    enemyType: string;
+    name: string;
+    x: number;
+    y: number;
+    killedAt: number;
+    killerToken: number;
+    lootDropNonce: string;
+    deathFinalizedAt: number;
+    dead: true;
+    destroyed: true;
+    deathVersion: number;
+};
+
 export class GlobalState {
     // Token -> Pending Transfer
     static pendingWorld: Map<number, PendingTransfer> = new Map();
@@ -86,6 +114,8 @@ export class GlobalState {
     // Level scope key -> Map<EntityId, EntityData>
     static levelEntities: Map<string, Map<number, any>> = new Map();
     static levelQuestProgress: Map<string, SharedDungeonProgressState> = new Map();
+    static dungeonCutscenes: Map<string, SharedDungeonCutsceneState> = new Map();
+    static deadServerAuthorityHostilesByScope: Map<string, Map<string, DeadHostileTombstone>> = new Map();
     static combatContributions: Map<string, Map<string, number>> = new Map();
     static entityLifeNonces: Map<string, number> = new Map();
     static entityLastRewardNonces: Map<string, number> = new Map();

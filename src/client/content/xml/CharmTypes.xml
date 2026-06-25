@@ -41,9 +41,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>1</PrimaryCost>
 		<CharmSize>1</CharmSize>
-		<ProcChanceUp>0.033333333333333</ProcChanceUp>
+		<ProcChanceUp>0.006666666666667</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst1</IconName>
-		<Description>+0.5% kritik sans</Description>
+		<Description>+0.1% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead01">
 		<CharmID>3</CharmID>
@@ -77,9 +77,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>1</PrimaryCost>
 		<CharmSize>1</CharmSize>
-		<PowerBonus>0.005</PowerBonus>
+		<PowerBonus>0.001</PowerBonus>
 		<IconName>a_CharmIcon_Ruby1</IconName>
-		<Description>+0.5% kritik bonus</Description>
+		<Description>+0.1% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan01">
 		<CharmID>6</CharmID>
@@ -113,9 +113,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>8</PrimaryCost>
 		<CharmSize>2</CharmSize>
-		<ProcChanceUp>0.066666666666667</ProcChanceUp>
+		<ProcChanceUp>0.013333333333333</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst2</IconName>
-		<Description>+1% kritik sans</Description>
+		<Description>+0.2% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead02">
 		<CharmID>9</CharmID>
@@ -149,9 +149,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>16</PrimaryCost>
 		<CharmSize>2</CharmSize>
-		<PowerBonus>0.01</PowerBonus>
+		<PowerBonus>0.002</PowerBonus>
 		<IconName>a_CharmIcon_Ruby2</IconName>
-		<Description>+1% kritik bonus</Description>
+		<Description>+0.2% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan02">
 		<CharmID>12</CharmID>
@@ -185,9 +185,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>28</PrimaryCost>
 		<CharmSize>3</CharmSize>
-		<ProcChanceUp>0.1</ProcChanceUp>
+		<ProcChanceUp>0.02</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst3</IconName>
-		<Description>+1.5% kritik sans</Description>
+		<Description>+0.3% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead03">
 		<CharmID>15</CharmID>
@@ -221,9 +221,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>41</PrimaryCost>
 		<CharmSize>3</CharmSize>
-		<PowerBonus>0.015</PowerBonus>
+		<PowerBonus>0.003</PowerBonus>
 		<IconName>a_CharmIcon_Ruby3</IconName>
-		<Description>+1.5% kritik bonus</Description>
+		<Description>+0.3% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan03">
 		<CharmID>18</CharmID>
@@ -257,9 +257,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>57</PrimaryCost>
 		<CharmSize>4</CharmSize>
-		<ProcChanceUp>0.133333333333333</ProcChanceUp>
+		<ProcChanceUp>0.026666666666667</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst4</IconName>
-		<Description>+2% kritik sans</Description>
+		<Description>+0.4% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead04">
 		<CharmID>21</CharmID>
@@ -293,9 +293,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>75</PrimaryCost>
 		<CharmSize>4</CharmSize>
-		<PowerBonus>0.02</PowerBonus>
+		<PowerBonus>0.004</PowerBonus>
 		<IconName>a_CharmIcon_Ruby4</IconName>
-		<Description>+2% kritik bonus</Description>
+		<Description>+0.4% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan04">
 		<CharmID>24</CharmID>
@@ -329,9 +329,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>95</PrimaryCost>
 		<CharmSize>5</CharmSize>
-		<ProcChanceUp>0.166666666666667</ProcChanceUp>
+		<ProcChanceUp>0.033333333333333</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst5</IconName>
-		<Description>+2.5% kritik sans</Description>
+		<Description>+0.5% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead05">
 		<CharmID>27</CharmID>
@@ -365,9 +365,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>117</PrimaryCost>
 		<CharmSize>5</CharmSize>
-		<PowerBonus>0.025</PowerBonus>
+		<PowerBonus>0.005</PowerBonus>
 		<IconName>a_CharmIcon_Ruby5</IconName>
-		<Description>+2.5% kritik bonus</Description>
+		<Description>+0.5% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan05">
 		<CharmID>30</CharmID>
@@ -401,9 +401,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>141</PrimaryCost>
 		<CharmSize>6</CharmSize>
-		<ProcChanceUp>0.2</ProcChanceUp>
+		<ProcChanceUp>0.04</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst6</IconName>
-		<Description>+3% kritik sans</Description>
+		<Description>+0.6% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead06">
 		<CharmID>33</CharmID>
@@ -437,9 +437,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>168</PrimaryCost>
 		<CharmSize>6</CharmSize>
-		<PowerBonus>0.03</PowerBonus>
+		<PowerBonus>0.006</PowerBonus>
 		<IconName>a_CharmIcon_Ruby6</IconName>
-		<Description>+3% kritik bonus</Description>
+		<Description>+0.6% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan06">
 		<CharmID>36</CharmID>
@@ -473,9 +473,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>197</PrimaryCost>
 		<CharmSize>7</CharmSize>
-		<ProcChanceUp>0.233333333333333</ProcChanceUp>
+		<ProcChanceUp>0.046666666666667</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst7</IconName>
-		<Description>+3.5% kritik sans</Description>
+		<Description>+0.7% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead07">
 		<CharmID>39</CharmID>
@@ -509,9 +509,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>228</PrimaryCost>
 		<CharmSize>7</CharmSize>
-		<PowerBonus>0.035</PowerBonus>
+		<PowerBonus>0.007</PowerBonus>
 		<IconName>a_CharmIcon_Ruby7</IconName>
-		<Description>+3.5% kritik bonus</Description>
+		<Description>+0.7% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan07">
 		<CharmID>42</CharmID>
@@ -545,9 +545,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>261</PrimaryCost>
 		<CharmSize>8</CharmSize>
-		<ProcChanceUp>0.266666666666667</ProcChanceUp>
+		<ProcChanceUp>0.053333333333333</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst8</IconName>
-		<Description>+4% kritik sans</Description>
+		<Description>+0.8% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead08">
 		<CharmID>45</CharmID>
@@ -581,9 +581,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>296</PrimaryCost>
 		<CharmSize>8</CharmSize>
-		<PowerBonus>0.04</PowerBonus>
+		<PowerBonus>0.008</PowerBonus>
 		<IconName>a_CharmIcon_Ruby8</IconName>
-		<Description>+4% kritik bonus</Description>
+		<Description>+0.8% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan08">
 		<CharmID>48</CharmID>
@@ -617,9 +617,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>333</PrimaryCost>
 		<CharmSize>9</CharmSize>
-		<ProcChanceUp>0.3</ProcChanceUp>
+		<ProcChanceUp>0.06</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst9</IconName>
-		<Description>+4.5% kritik sans</Description>
+		<Description>+0.9% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead09">
 		<CharmID>51</CharmID>
@@ -653,9 +653,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>372</PrimaryCost>
 		<CharmSize>9</CharmSize>
-		<PowerBonus>0.045</PowerBonus>
+		<PowerBonus>0.009</PowerBonus>
 		<IconName>a_CharmIcon_Ruby9</IconName>
-		<Description>+4.5% kritik bonus</Description>
+		<Description>+0.9% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan09">
 		<CharmID>54</CharmID>
@@ -687,9 +687,9 @@
 		<PrimaryType>Infernal</PrimaryType>
 		<PrimaryCost>400</PrimaryCost>
 		<CharmSize>10</CharmSize>
-		<ProcChanceUp>0.333333333333333</ProcChanceUp>
+		<ProcChanceUp>0.066666666666667</ProcChanceUp>
 		<IconName>a_CharmIcon_Amethyst10</IconName>
-		<Description>+5% kritik sans</Description>
+		<Description>+1% kritik sans</Description>
 	</CharmType>
 	<CharmType CharmName="Undead10">
 		<CharmID>57</CharmID>
@@ -720,9 +720,9 @@
 		<PrimaryType>Draconic</PrimaryType>
 		<PrimaryCost>400</PrimaryCost>
 		<CharmSize>10</CharmSize>
-		<PowerBonus>0.05</PowerBonus>
+		<PowerBonus>0.01</PowerBonus>
 		<IconName>a_CharmIcon_Ruby10</IconName>
-		<Description>+5% kritik bonus</Description>
+		<Description>+1% kritik bonus</Description>
 	</CharmType>
 	<CharmType CharmName="Sylvan10">
 		<CharmID>60</CharmID>

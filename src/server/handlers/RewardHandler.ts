@@ -6,7 +6,7 @@ import { GlobalState } from '../core/GlobalState';
 import { noteDungeonRunChestOpened, noteDungeonRunTreasure } from '../core/DungeonRunStats';
 import { CombatHandler } from './CombatHandler';
 import { getClientCharacterKey, getPartyIdForClient } from '../core/PartySync';
-import { areClientsInSameLevelScope, getClientLevelScope } from '../core/LevelScope';
+import { areClientsInSameLevelScope, getClientLevelScope, getScopeLevelName } from '../core/LevelScope';
 import { LevelConfig } from '../core/LevelConfig';
 import { upsertInventoryGear } from '../utils/GearInventory';
 import { getEquippedCharmBonuses } from '../utils/CharmBonuses';
@@ -15,6 +15,7 @@ import { getActivePotionBonuses } from '../utils/ConsumableState';
 import { normalizeCharacterMaterials } from '../utils/MaterialInventory';
 import { PetHandler } from './PetHandler';
 import { Config } from '../core/config';
+import { EntityHandler } from './EntityHandler';
 
 interface RewardRequest {
     receiverId: number;
@@ -41,7 +42,39 @@ interface LootReward {
     tier?: number;
     material?: number;
     dye?: number;
+    __lootDropMetadata?: LootDropServerMetadata;
 }
+
+type LootDropServerMetadata = {
+    lootdropId: number;
+    lootDropNonce: string;
+    sourceEnemyLootDropNonce: string;
+    sourceEnemyCanonicalId: number;
+    ownerToken: number;
+    partyId: number;
+    sharedScope: string;
+    amount: number;
+    type: string;
+    reason: string;
+    caller: string;
+    collected: boolean;
+    collectedBy: number;
+};
+
+type LootReason =
+    | 'canonical_hostile_death'
+    | 'quest_reward'
+    | 'chest_reward'
+    | 'debug'
+    | 'legacy_enemy_reward'
+    | 'unknown';
+
+type LootGrantContext = {
+    sourceLootDropNonce?: string;
+    sourceEnemyCanonicalId?: number;
+    reason?: LootReason;
+    caller?: string;
+};
 
 type XpRewardDebug = {
     attempted: boolean;
@@ -493,9 +526,183 @@ export class RewardHandler {
         return LevelConfig.isDungeonLevel(normalizedLevel) || Boolean(RewardHandler.DUNGEON_REALM_MAP[normalizedLevel]);
     }
 
-    private static spawnLoot(client: Client, x: number, y: number, reward: LootReward, offsetX: number = 0, offsetY: number = 0): void {
+    private static getRewardType(reward: LootReward): string {
+        if (reward.gold && reward.gold > 0) return 'gold';
+        if (reward.health && reward.health > 0) return 'health';
+        if (reward.gear && reward.gear > 0) return 'gear';
+        if (reward.material && reward.material > 0) return 'material';
+        if (reward.dye && reward.dye > 0) return 'dye';
+        return 'unknown';
+    }
+
+    private static getRewardAmount(reward: LootReward): number {
+        if (reward.gold && reward.gold > 0) return reward.gold;
+        if (reward.health && reward.health > 0) return reward.health;
+        if (reward.gear && reward.gear > 0) return reward.gear;
+        if (reward.material && reward.material > 0) return reward.material;
+        if (reward.dye && reward.dye > 0) return reward.dye;
+        return 0;
+    }
+
+    private static getCanonicalLootSource(metadata: LootDropServerMetadata | undefined): any {
+        if (!metadata?.sharedScope || metadata.sourceEnemyCanonicalId <= 0) {
+            return null;
+        }
+
+        return GlobalState.levelEntities.get(metadata.sharedScope)?.get(metadata.sourceEnemyCanonicalId) ?? null;
+    }
+
+    private static normalizeNumberSet(value: unknown): Set<number> {
+        if (value instanceof Set) {
+            return new Set<number>(Array.from(value).map((entry) => Math.round(Number(entry) || 0)).filter((entry) => entry > 0));
+        }
+        if (Array.isArray(value)) {
+            return new Set<number>(value.map((entry) => Math.round(Number(entry) || 0)).filter((entry) => entry > 0));
+        }
+        return new Set<number>();
+    }
+
+    private static normalizeStringSet(value: unknown): Set<string> {
+        if (value instanceof Set) {
+            return new Set<string>(Array.from(value).map((entry) => String(entry)));
+        }
+        if (Array.isArray(value)) {
+            return new Set<string>(value.map((entry) => String(entry)));
+        }
+        return new Set<string>();
+    }
+
+    private static isEnemyLootReason(reason: string): boolean {
+        return reason === 'canonical_hostile_death' || reason === 'legacy_enemy_reward';
+    }
+
+    private static isCanonicalDeathLootContextValid(
+        levelScope: string,
+        sourceEnemyCanonicalId: number,
+        sourceEnemyLootDropNonce: string
+    ): boolean {
+        if (sourceEnemyCanonicalId <= 0 || !sourceEnemyLootDropNonce) {
+            return false;
+        }
+
+        const canonicalEntity = GlobalState.levelEntities.get(levelScope)?.get(sourceEnemyCanonicalId);
+        return Boolean(
+            canonicalEntity &&
+            canonicalEntity.dead === true &&
+            canonicalEntity.destroyed === true &&
+            Math.max(0, Math.round(Number(canonicalEntity.deathFinalizedAt ?? 0))) > 0 &&
+            String(canonicalEntity.lootDropNonce ?? '') === sourceEnemyLootDropNonce
+        );
+    }
+
+    private static isHostileRewardSource(sourceEntity: any): boolean {
+        return Boolean(sourceEntity && !sourceEntity.isPlayer && Number(sourceEntity.team ?? 0) === 2);
+    }
+
+    private static getRewardSourceReason(sourceEntity: any): LootReason {
+        if (RewardHandler.isHostileRewardSource(sourceEntity)) {
+            return 'legacy_enemy_reward';
+        }
+
+        const entName = String(sourceEntity?.name ?? sourceEntity?.EntName ?? sourceEntity?.entName ?? '').trim();
+        const entType = entName ? GameData.getEntType(entName) ?? {} : {};
+        const behavior = String(entType.Behavior ?? sourceEntity?.behavior ?? sourceEntity?.Behavior ?? '').trim();
+        if (/treasurechest/i.test(entName) || behavior === 'TreasureChest') {
+            return 'chest_reward';
+        }
+
+        return 'unknown';
+    }
+
+    private static formatLootSyncFields(fields: Record<string, unknown>): string {
+        return Object.entries(fields)
+            .map(([key, value]) => `${key}=${String(value ?? '').replace(/\s+/g, '_')}`)
+            .join(' ');
+    }
+
+    private static spawnLoot(
+        client: Client,
+        x: number,
+        y: number,
+        reward: LootReward,
+        offsetX: number = 0,
+        offsetY: number = 0,
+        context: LootGrantContext = {}
+    ): void {
         const lootId = ++RewardHandler.nextLootId;
-        client.pendingLoot.set(lootId, reward);
+        const type = RewardHandler.getRewardType(reward);
+        const sourceEnemyLootDropNonce = String(context.sourceLootDropNonce ?? '');
+        const sourceEnemyCanonicalId = Math.max(0, Math.round(Number(context.sourceEnemyCanonicalId ?? 0)));
+        const reason = context.reason ?? 'unknown';
+        const caller = String(context.caller ?? 'unknown');
+        const levelScope = getClientLevelScope(client);
+        const metadata: LootDropServerMetadata = {
+            lootdropId: lootId,
+            lootDropNonce: sourceEnemyLootDropNonce
+                ? `${sourceEnemyLootDropNonce}:${client.token}:${lootId}`
+                : `${levelScope}:loot:${client.token}:${lootId}`,
+            sourceEnemyLootDropNonce,
+            sourceEnemyCanonicalId,
+            ownerToken: Math.max(0, Math.round(Number(client.token ?? 0))),
+            partyId: Math.max(0, Math.round(Number(getPartyIdForClient(client) ?? 0))),
+            sharedScope: levelScope,
+            amount: RewardHandler.getRewardAmount(reward),
+            type,
+            reason,
+            caller,
+            collected: false,
+            collectedBy: 0
+        };
+        CombatHandler.logLootSync('spawnLoot-callsite', {
+            caller,
+            viewer: client.character?.name ?? '',
+            token: client.token,
+            sourceEnemy: metadata.sourceEnemyCanonicalId,
+            reason
+        });
+        const isServerAuthorityHostileLevel = EntityHandler.usesServerAuthorityHostiles(getScopeLevelName(levelScope));
+        if (
+            isServerAuthorityHostileLevel &&
+            RewardHandler.isEnemyLootReason(reason) &&
+            !RewardHandler.isCanonicalDeathLootContextValid(levelScope, metadata.sourceEnemyCanonicalId, metadata.sourceEnemyLootDropNonce)
+        ) {
+            CombatHandler.logLootSync('legacy-loot-blocked', {
+                viewer: client.character?.name ?? '',
+                token: client.token,
+                scope: levelScope,
+                sourceEnemy: metadata.sourceEnemyCanonicalId,
+                reason: 'missing_canonical_death',
+                caller
+            });
+            if (metadata.sourceEnemyCanonicalId === 0) {
+                console.error(`[LootSync][ERROR-sourceEnemy-zero-hostile-loot] ${RewardHandler.formatLootSyncFields({
+                    viewer: client.character?.name ?? '',
+                    token: client.token,
+                    scope: levelScope,
+                    lootdropId: lootId,
+                    caller
+                })}`);
+            }
+            return;
+        }
+        const pendingReward: LootReward = { ...reward, __lootDropMetadata: metadata };
+        client.pendingLoot.set(lootId, pendingReward);
+        const sourceEntity = RewardHandler.getCanonicalLootSource(metadata);
+        if (sourceEntity && typeof sourceEntity === 'object') {
+            sourceEntity.lootDrops = sourceEntity.lootDrops instanceof Map ? sourceEntity.lootDrops : new Map<number, LootDropServerMetadata>();
+            sourceEntity.lootDrops.set(lootId, metadata);
+        }
+        CombatHandler.logLootSync('loot-spawn-out', {
+            viewer: client.character?.name ?? '',
+            token: client.token,
+            lootdropId: lootId,
+            nonce: metadata.lootDropNonce,
+            sourceEnemy: metadata.sourceEnemyCanonicalId,
+            amount: metadata.amount,
+            type,
+            reason,
+            caller
+        });
         client.send(0x32, RewardHandler.buildLootdrop(lootId, x + offsetX, y + offsetY, reward));
     }
 
@@ -813,11 +1020,14 @@ export class RewardHandler {
         if (!client.userId || !client.character) {
             return;
         }
-        const index = client.characters.findIndex((entry) => entry.name === client.character?.name);
+        const characters = Array.isArray((client as Client & { characters?: unknown }).characters)
+            ? client.characters
+            : [];
+        const index = characters.findIndex((entry) => entry.name === client.character?.name);
         if (index >= 0) {
-            client.characters[index] = client.character;
-        } else {
-            client.characters.push(client.character);
+            characters[index] = client.character;
+        } else if (characters === client.characters) {
+            characters.push(client.character);
         }
         if (typeof client.scheduleCharacterSave === 'function') {
             client.scheduleCharacterSave(reason);
@@ -890,27 +1100,50 @@ export class RewardHandler {
     private static applyRewardToRecipient(
         client: Client,
         reward: RewardRequest,
-        rewardNonce: number,
+        rewardNonce: string | number,
         sourceEntity: any,
-        dropPosition: { x: number; y: number }
-    ): void {
+        dropPosition: { x: number; y: number },
+        context: LootGrantContext = {}
+    ): boolean {
         if (!client.character || !client.currentLevel) {
-            return;
+            return false;
         }
 
         const rewardKey = `${getClientLevelScope(client)}:${reward.sourceId}:${rewardNonce}`;
         if (client.processedRewardSources.has(rewardKey)) {
-            return;
+            if (context.sourceLootDropNonce) {
+                CombatHandler.logLootSync('loot-grant-skip', {
+                    canonicalId: context.sourceEnemyCanonicalId ?? reward.sourceId,
+                    nonce: context.sourceLootDropNonce,
+                    viewer: client.character?.name ?? '',
+                    token: client.token,
+                    reason: 'already_processed'
+                });
+            }
+            return false;
         }
         client.processedRewardSources.add(rewardKey);
 
         const resolved = RewardHandler.maybeOverrideDungeonReward(client, sourceEntity, reward);
+        const reason = context.reason ?? 'unknown';
+        const caller = context.caller ?? 'unknown';
+        if (context.sourceLootDropNonce) {
+            CombatHandler.logLootSync('loot-grant', {
+                canonicalId: context.sourceEnemyCanonicalId ?? reward.sourceId,
+                nonce: context.sourceLootDropNonce,
+                viewer: client.character?.name ?? '',
+                token: client.token,
+                amount: resolved.gold,
+                reason,
+                caller
+            });
+        }
         const shouldSave = RewardHandler.applyXpReward(client, resolved.exp);
 
         noteDungeonRunChestOpened(client, reward.sourceId, sourceEntity);
 
         if (resolved.gold > 0) {
-            RewardHandler.spawnLoot(client, dropPosition.x, dropPosition.y, { gold: resolved.gold });
+            RewardHandler.spawnLoot(client, dropPosition.x, dropPosition.y, { gold: resolved.gold }, 0, 0, context);
         }
         if (resolved.hpGain > 0) {
             RewardHandler.spawnLoot(
@@ -919,7 +1152,8 @@ export class RewardHandler {
                 dropPosition.y,
                 { health: resolved.hpGain },
                 Math.floor(Math.random() * 31) - 15,
-                Math.floor(Math.random() * 31) - 15
+                Math.floor(Math.random() * 31) - 15,
+                context
             );
         }
         if (resolved.gearId > 0) {
@@ -929,7 +1163,8 @@ export class RewardHandler {
                 dropPosition.y,
                 { gear: resolved.gearId, tier: resolved.gearTier },
                 Math.floor(Math.random() * 41) - 20,
-                Math.floor(Math.random() * 21) - 10
+                Math.floor(Math.random() * 21) - 10,
+                context
             );
         }
         if (resolved.materialId > 0) {
@@ -939,7 +1174,8 @@ export class RewardHandler {
                 dropPosition.y,
                 { material: resolved.materialId },
                 Math.floor(Math.random() * 41) - 20,
-                Math.floor(Math.random() * 21) - 10
+                Math.floor(Math.random() * 21) - 10,
+                context
             );
         }
         if (resolved.dyeId > 0) {
@@ -949,13 +1185,15 @@ export class RewardHandler {
                 dropPosition.y,
                 { dye: resolved.dyeId },
                 Math.floor(Math.random() * 41) - 20,
-                Math.floor(Math.random() * 21) - 10
+                Math.floor(Math.random() * 21) - 10,
+                context
             );
         }
 
         if (shouldSave) {
             RewardHandler.persistCharacter(client, 'reward grant');
         }
+        return true;
     }
 
     static handleGrantReward(client: Client, data: Buffer): void {
@@ -985,14 +1223,170 @@ export class RewardHandler {
         const sourceEntity = RewardHandler.resolveSourceEntity(client, reward.sourceId);
         const dropPosition = RewardHandler.resolveDropPosition(client, sourceEntity, reward.worldX, reward.worldY);
         const { rewardNonce, recipients } = RewardHandler.resolveEligibleRecipients(client, reward.sourceId);
+        const reason = RewardHandler.getRewardSourceReason(sourceEntity);
+        const caller = 'handleGrantReward';
+        const levelScope = getClientLevelScope(client);
+        if (
+            EntityHandler.usesServerAuthorityHostiles(client.currentLevel) &&
+            reason === 'legacy_enemy_reward'
+        ) {
+            CombatHandler.logLootSync('spawnLoot-callsite', {
+                caller,
+                viewer: client.character?.name ?? '',
+                token: client.token,
+                sourceEnemy: 0,
+                reason
+            });
+            CombatHandler.logLootSync('enemy-reward-blocked-no-canonical-context', {
+                viewer: client.character?.name ?? '',
+                token: client.token,
+                scope: levelScope,
+                caller
+            });
+            CombatHandler.logLootSync('legacy-loot-blocked', {
+                viewer: client.character?.name ?? '',
+                token: client.token,
+                scope: levelScope,
+                sourceEnemy: 0,
+                reason: 'missing_canonical_death',
+                caller
+            });
+            return;
+        }
 
         for (const recipient of recipients) {
             if (!recipient.playerSpawned || !areClientsInSameLevelScope(client, recipient)) {
                 continue;
             }
 
-            RewardHandler.applyRewardToRecipient(recipient, reward, rewardNonce, sourceEntity, dropPosition);
+            RewardHandler.applyRewardToRecipient(recipient, reward, rewardNonce, sourceEntity, dropPosition, {
+                reason,
+                caller
+            });
         }
+    }
+
+    private static resolveServerEnemyRewardViewers(client: Client, levelScope: string): Client[] {
+        const partyId = getPartyIdForClient(client);
+        if (partyId <= 0) {
+            return client.character && client.playerSpawned && getClientLevelScope(client) === levelScope ? [client] : [];
+        }
+
+        const recipients: Client[] = [];
+        for (const other of GlobalState.sessionsByToken.values()) {
+            if (
+                !other.playerSpawned ||
+                !other.character ||
+                getClientLevelScope(other) !== levelScope ||
+                getPartyIdForClient(other) !== partyId
+            ) {
+                continue;
+            }
+            recipients.push(other);
+        }
+
+        return recipients;
+    }
+
+    static grantServerEnemyRewardToEligibleViewers(
+        client: Client,
+        sourceEntity: any,
+        options: { levelScope?: string; lootDropNonce?: string | number; sourceEnemyCanonicalId?: number; caller?: string } = {}
+    ): void {
+        if (
+            !client.character ||
+            !client.currentLevel ||
+            !sourceEntity ||
+            sourceEntity.isPlayer ||
+            Number(sourceEntity.team ?? 0) !== 2
+        ) {
+            return;
+        }
+
+        const sourceId = Math.max(0, Math.round(Number(sourceEntity.id ?? 0)));
+        const entName = String(sourceEntity.name ?? sourceEntity.EntName ?? sourceEntity.entName ?? '').trim();
+        if (sourceId <= 0 || !entName) {
+            return;
+        }
+
+        const levelScope = String(options.levelScope ?? getClientLevelScope(client));
+        const sourceEnemyCanonicalId = Math.max(0, Math.round(Number(options.sourceEnemyCanonicalId ?? 0)));
+        const sourceLootDropNonce = String(options.lootDropNonce ?? '');
+        const caller = String(options.caller ?? 'grantServerEnemyRewardToEligibleViewers');
+        if (
+            EntityHandler.usesServerAuthorityHostiles(getScopeLevelName(levelScope)) &&
+            (
+                sourceEnemyCanonicalId !== sourceId ||
+                !RewardHandler.isCanonicalDeathLootContextValid(levelScope, sourceEnemyCanonicalId, sourceLootDropNonce)
+            )
+        ) {
+            CombatHandler.logLootSync('enemy-reward-blocked-no-canonical-context', {
+                viewer: client.character?.name ?? '',
+                token: client.token,
+                scope: levelScope,
+                caller
+            });
+            return;
+        }
+        const entType = GameData.getEntType(entName) ?? {};
+        const entLevel = Math.max(
+            1,
+            Math.round(Number(sourceEntity.level ?? entType.Level ?? client.character.level ?? 1) || 1)
+        );
+        const entRank = String(entType.EntRank ?? sourceEntity.entRank ?? sourceEntity.EntRank ?? 'Minion').trim();
+        const maxHp = Math.max(100, Math.round(Number(client.authoritativeMaxHp ?? sourceEntity.maxHp ?? 100) || 100));
+        const reward: RewardRequest = {
+            receiverId: Math.max(0, Math.round(Number(client.clientEntID ?? 0))),
+            sourceId,
+            dropItem: true,
+            itemMultiplier: 1,
+            dropGear: true,
+            gearMultiplier: 1,
+            dropMaterial: true,
+            dropTrove: false,
+            exp: GameData.calculateNpcExp(entName, entLevel),
+            petExp: 0,
+            hpGain: entRank === 'Boss' || entRank === 'MiniBoss'
+                ? Math.max(1, Math.floor(maxHp * 0.15))
+                : 0,
+            gold: GameData.calculateNpcGold(entName, entLevel),
+            worldX: Math.round(Number(sourceEntity.x ?? sourceEntity.pos_x ?? 0) || 0),
+            worldY: Math.round(Number(sourceEntity.y ?? sourceEntity.pos_y ?? 0) || 0),
+            combo: 0
+        };
+        const dropPosition = RewardHandler.resolveDropPosition(client, sourceEntity, reward.worldX, reward.worldY);
+        const recipients = RewardHandler.resolveServerEnemyRewardViewers(client, levelScope);
+        sourceEntity.lootGrantedTokens = RewardHandler.normalizeNumberSet(sourceEntity.lootGrantedTokens);
+
+        for (const recipient of recipients) {
+            if (!recipient.playerSpawned || getClientLevelScope(recipient) !== levelScope) {
+                continue;
+            }
+            if (sourceEntity.lootGrantedTokens.has(recipient.token)) {
+                CombatHandler.logLootSync('loot-grant-skip', {
+                    canonicalId: sourceId,
+                    nonce: sourceLootDropNonce,
+                    viewer: recipient.character?.name ?? '',
+                    token: recipient.token,
+                    reason: 'already_granted'
+                });
+                continue;
+            }
+
+            sourceEntity.lootGrantedTokens.add(recipient.token);
+            RewardHandler.applyRewardToRecipient(recipient, reward, sourceLootDropNonce, sourceEntity, dropPosition, {
+                sourceLootDropNonce,
+                sourceEnemyCanonicalId: sourceId,
+                reason: 'canonical_hostile_death',
+                caller
+            });
+        }
+    }
+
+    static grantServerEnemyReward(client: Client, sourceEntity: any): void {
+        RewardHandler.grantServerEnemyRewardToEligibleViewers(client, sourceEntity, {
+            caller: 'grantServerEnemyReward'
+        });
     }
 
     static handlePickupLootdrop(client: Client, data: Buffer): void {
@@ -1001,6 +1395,60 @@ export class RewardHandler {
         const reward = client.pendingLoot.get(lootId);
         if (!reward || !client.character) {
             return;
+        }
+
+        const metadata = reward.__lootDropMetadata;
+        if (metadata) {
+            if (metadata.ownerToken > 0 && metadata.ownerToken !== client.token) {
+                CombatHandler.logLootSync('pickup-duplicate-drop', {
+                    lootdropId: lootId,
+                    nonce: metadata.lootDropNonce,
+                    token: client.token,
+                    reason: 'owner_mismatch'
+                });
+                client.pendingLoot.delete(lootId);
+                return;
+            }
+
+            const sourceEntity = RewardHandler.getCanonicalLootSource(metadata);
+            const collectedTokens = sourceEntity && typeof sourceEntity === 'object'
+                ? RewardHandler.normalizeStringSet(sourceEntity.lootCollectedTokens)
+                : new Set<string>();
+            const collectKey = metadata.ownerToken > 0
+                ? `${metadata.lootDropNonce}:${client.token}`
+                : metadata.lootDropNonce;
+            if (metadata.collected || collectedTokens.has(collectKey)) {
+                CombatHandler.logLootSync('pickup-duplicate-drop', {
+                    lootdropId: lootId,
+                    nonce: metadata.lootDropNonce,
+                    token: client.token,
+                    reason: 'already_collected'
+                });
+                client.pendingLoot.delete(lootId);
+                return;
+            }
+
+            metadata.collected = true;
+            metadata.collectedBy = client.token;
+            collectedTokens.add(collectKey);
+            if (sourceEntity && typeof sourceEntity === 'object') {
+                sourceEntity.lootCollectedTokens = collectedTokens;
+            }
+            CombatHandler.logLootSync('pickup', {
+                lootdropId: lootId,
+                nonce: metadata.lootDropNonce,
+                token: client.token,
+                amount: metadata.amount,
+                reason: metadata.reason,
+                caller: metadata.caller
+            });
+        } else {
+            CombatHandler.logLootSync('pickup', {
+                lootdropId: lootId,
+                nonce: '',
+                token: client.token,
+                amount: RewardHandler.getRewardAmount(reward)
+            });
         }
 
         client.pendingLoot.delete(lootId);
