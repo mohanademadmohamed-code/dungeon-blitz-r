@@ -1,8 +1,11 @@
 import { Config } from '../core/config';
+import { DiscordAccountLinkStore } from '../integrations/DiscordAccountLinkStore';
 import { Character } from './Database';
 import { MongoWalletAdapter, WalletPersistenceAdapter } from './MongoWalletAdapter';
 import {
     applyWalletSnapshot,
+    createWalletDocument,
+    createWalletOwnerIdentity,
     extractWalletSnapshot,
     getWalletFieldValue,
     LockboxDelta,
@@ -12,6 +15,7 @@ import {
     WalletCurrencyField,
     WalletDelta,
     WalletDocument,
+    WalletOwnerIdentity,
     WALLET_CURRENCY_FIELDS
 } from './WalletTypes';
 
@@ -20,9 +24,27 @@ type WalletClient = {
     character: Character | null;
 };
 
+type WalletIdentityResolver = (gameUserId: number) => Promise<WalletOwnerIdentity>;
+
+const discordAccountLinks = new DiscordAccountLinkStore();
+
+async function resolveWalletOwnerIdentity(gameUserId: number): Promise<WalletOwnerIdentity> {
+    const normalizedGameUserId = normalizeWalletNumber(gameUserId);
+    const link = await discordAccountLinks.findByUserId(normalizedGameUserId).catch((error) => {
+        console.warn(`[Wallet] Could not read Discord account link for game user ${normalizedGameUserId}:`, error);
+        return null;
+    });
+
+    // The Discord bot stores user documents by string Discord snowflake. Wallet
+    // documents mirror that userId shape when a link exists, but they never copy
+    // OAuth tokens or linked-role metadata into the game wallet collection.
+    return createWalletOwnerIdentity(normalizedGameUserId, link?.discordUserId);
+}
+
 export class WalletService {
     private static enabled = Boolean(Config.ENABLE_MONGO_WALLET);
     private static initialized = false;
+    private static identityResolver: WalletIdentityResolver = resolveWalletOwnerIdentity;
     private static adapter: WalletPersistenceAdapter = new MongoWalletAdapter(
         Config.MONGODB_URI,
         Config.MONGODB_DB_NAME,
@@ -33,10 +55,15 @@ export class WalletService {
         return WalletService.enabled;
     }
 
-    static configureForTests(adapter: WalletPersistenceAdapter, enabled: boolean): void {
+    static configureForTests(
+        adapter: WalletPersistenceAdapter,
+        enabled: boolean,
+        identityResolver: WalletIdentityResolver = async (gameUserId) => createWalletOwnerIdentity(gameUserId)
+    ): void {
         WalletService.adapter = adapter;
         WalletService.enabled = enabled;
         WalletService.initialized = !enabled;
+        WalletService.identityResolver = identityResolver;
     }
 
     static async initialize(): Promise<void> {
@@ -61,7 +88,8 @@ export class WalletService {
             return;
         }
 
-        const wallet = await WalletService.adapter.getOrCreateWallet(userId, character);
+        const identity = await WalletService.resolveIdentity(userId);
+        const wallet = await WalletService.adapter.getOrCreateWallet(identity, character);
         applyWalletSnapshot(character, wallet);
     }
 
@@ -115,8 +143,9 @@ export class WalletService {
             return WalletService.applyLocalDelta(client.character, normalizedDelta);
         }
 
-        await WalletService.adapter.getOrCreateWallet(client.userId, client.character);
-        const wallet = await WalletService.adapter.applyDelta(client.userId, client.character, normalizedDelta);
+        const identity = await WalletService.resolveIdentity(client.userId);
+        await WalletService.adapter.getOrCreateWallet(identity, client.character);
+        const wallet = await WalletService.adapter.applyDelta(identity, client.character, normalizedDelta);
         if (!wallet) {
             await WalletService.overlayWallet(client.userId, client.character);
             return false;
@@ -133,14 +162,15 @@ export class WalletService {
 
         const now = new Date();
         return {
-            userId: 0,
-            characterNameKey: String(character.name ?? '').trim().toLowerCase(),
-            characterName: String(character.name ?? '').trim(),
-            ...extractWalletSnapshot(character),
-            version: 1,
+            ...createWalletDocument(createWalletOwnerIdentity(0), character),
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            lastUpdated: now.getTime()
         };
+    }
+
+    private static async resolveIdentity(userId: number): Promise<WalletOwnerIdentity> {
+        return WalletService.identityResolver(normalizeWalletNumber(userId));
     }
 
     private static applyLocalDelta(character: Character, delta: WalletDelta): boolean {

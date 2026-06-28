@@ -71,3 +71,5 @@ ENABLE_MONGO_WALLET=true
 ```
 
 `MONGODB_DB_NAME` defaults to `dungeon_blitz_r`, and `MONGODB_WALLET_COLLECTION` defaults to `wallets`. `ENABLE_MONGO_WALLET` defaults to true when `MONGODB_URI` is present and false otherwise. If Mongo wallet mode is enabled but the server cannot connect at startup, the game server refuses to start instead of falling back to stale JSON wallet values.
+
+Wallet documents follow the Discord bot database convention of string user identity fields. Each wallet document has a deterministic `_id` of `<gameUserId>:<characterNameKey>`, a string `userId`, and the numeric `gameUserId`. When the game account is linked through `discord_account_links.json`, `userId` and `discordUserId` are the Discord snowflake; otherwise `userId` falls back to the game account id as a string. The wallet collection must not store Discord `accessToken`, `refreshToken`, `scope`, passwords, session secrets, or raw packet data.

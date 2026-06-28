@@ -3,20 +3,21 @@ import { Character } from './Database';
 import {
     createWalletDocument,
     getCharacterNameKey,
+    getWalletDocumentId,
     LockboxDelta,
     normalizeWalletDocument,
     normalizeWalletNumber,
-    WalletCurrencyField,
     WalletDelta,
     WalletDocument,
+    WalletOwnerIdentity,
     WALLET_CURRENCY_FIELDS
 } from './WalletTypes';
 
 export interface WalletPersistenceAdapter {
     connect(): Promise<void>;
     close(): Promise<void>;
-    getOrCreateWallet(userId: number, character: Character): Promise<WalletDocument>;
-    applyDelta(userId: number, character: Character, delta: WalletDelta): Promise<WalletDocument | null>;
+    getOrCreateWallet(identity: WalletOwnerIdentity, character: Character): Promise<WalletDocument>;
+    applyDelta(identity: WalletOwnerIdentity, character: Character, delta: WalletDelta): Promise<WalletDocument | null>;
 }
 
 export class MongoWalletAdapter implements WalletPersistenceAdapter {
@@ -39,11 +40,15 @@ export class MongoWalletAdapter implements WalletPersistenceAdapter {
             throw new Error('MONGODB_URI is required when ENABLE_MONGO_WALLET is active');
         }
 
-        const client = new MongoClient(this.uri);
+        const client = new MongoClient(this.uri, { ignoreUndefined: true });
         await client.connect();
         const db = client.db(this.dbName);
         const collection = db.collection<WalletDocument>(this.collectionName);
         await collection.createIndex({ userId: 1, characterNameKey: 1 }, { unique: true });
+        await collection.createIndex(
+            { gameUserId: 1, characterNameKey: 1 },
+            { unique: true, partialFilterExpression: { gameUserId: { $exists: true } } }
+        );
 
         this.client = client;
         this.db = db;
@@ -66,20 +71,47 @@ export class MongoWalletAdapter implements WalletPersistenceAdapter {
         return this.collection;
     }
 
-    async getOrCreateWallet(userId: number, character: Character): Promise<WalletDocument> {
-        const normalizedUserId = normalizeWalletNumber(userId);
+    async getOrCreateWallet(identity: WalletOwnerIdentity, character: Character): Promise<WalletDocument> {
         const characterNameKey = getCharacterNameKey(character);
+        const documentId = getWalletDocumentId(identity, character);
         const now = new Date();
-        const initialDocument = createWalletDocument(normalizedUserId, character);
+        const initialDocument = createWalletDocument(identity, character);
+        const insertOnlyDocument = {
+            _id: initialDocument._id,
+            gold: initialDocument.gold,
+            mammothIdols: initialDocument.mammothIdols,
+            DragonKeys: initialDocument.DragonKeys,
+            dragonOre: initialDocument.dragonOre,
+            SilverSigils: initialDocument.SilverSigils,
+            RoyalSigils: initialDocument.RoyalSigils,
+            lockboxes: initialDocument.lockboxes,
+            version: initialDocument.version,
+            createdAt: initialDocument.createdAt
+        };
+        const identityUpdate: Record<string, unknown> = {
+            userId: identity.userId,
+            gameUserId: identity.gameUserId,
+            identityProvider: identity.identityProvider,
+            characterNameKey,
+            characterName: String(character.name ?? '').trim(),
+            updatedAt: now,
+            lastUpdated: now.getTime()
+        };
+        if (identity.discordUserId) {
+            identityUpdate.discordUserId = identity.discordUserId;
+        }
+
+        const update: Record<string, unknown> = {
+            $setOnInsert: insertOnlyDocument,
+            $set: identityUpdate
+        };
+        if (!identity.discordUserId) {
+            update.$unset = { discordUserId: '' };
+        }
+
         const result = await this.getCollection().findOneAndUpdate(
-            { userId: normalizedUserId, characterNameKey },
-            {
-                $setOnInsert: initialDocument,
-                $set: {
-                    characterName: String(character.name ?? '').trim(),
-                    updatedAt: now
-                }
-            },
+            { _id: documentId },
+            update,
             {
                 upsert: true,
                 returnDocument: 'after'
@@ -87,23 +119,20 @@ export class MongoWalletAdapter implements WalletPersistenceAdapter {
         );
 
         if (!result) {
-            throw new Error(`Mongo wallet upsert returned no document for user ${normalizedUserId}/${characterNameKey}`);
+            throw new Error(`Mongo wallet upsert returned no document for user ${identity.userId}/${characterNameKey}`);
         }
 
         return normalizeWalletDocument(result);
     }
 
-    async applyDelta(userId: number, character: Character, delta: WalletDelta): Promise<WalletDocument | null> {
-        const normalizedUserId = normalizeWalletNumber(userId);
-        const characterNameKey = getCharacterNameKey(character);
+    async applyDelta(identity: WalletOwnerIdentity, character: Character, delta: WalletDelta): Promise<WalletDocument | null> {
         const updatePipeline = this.buildDeltaPipeline(delta);
         if (updatePipeline.length === 0) {
-            return this.getOrCreateWallet(normalizedUserId, character);
+            return this.getOrCreateWallet(identity, character);
         }
 
         const filter: Record<string, unknown> = {
-            userId: normalizedUserId,
-            characterNameKey,
+            _id: getWalletDocumentId(identity, character),
             ...this.buildSufficientBalanceFilter(delta)
         };
 
@@ -118,6 +147,7 @@ export class MongoWalletAdapter implements WalletPersistenceAdapter {
 
     private buildSufficientBalanceFilter(delta: WalletDelta): Record<string, unknown> {
         const filter: Record<string, unknown> = {};
+        const lockboxBalanceFilters: Record<string, unknown>[] = [];
         for (const field of WALLET_CURRENCY_FIELDS) {
             const amount = normalizeSignedDelta(delta[field]);
             if (amount < 0) {
@@ -127,13 +157,21 @@ export class MongoWalletAdapter implements WalletPersistenceAdapter {
 
         for (const lockboxDelta of this.normalizeLockboxDeltas(delta.lockboxes)) {
             if (lockboxDelta.delta < 0) {
-                filter.lockboxes = {
-                    $elemMatch: {
-                        lockboxID: lockboxDelta.lockboxID,
-                        count: { $gte: Math.abs(lockboxDelta.delta) }
+                lockboxBalanceFilters.push({
+                    lockboxes: {
+                        $elemMatch: {
+                            lockboxID: lockboxDelta.lockboxID,
+                            count: { $gte: Math.abs(lockboxDelta.delta) }
+                        }
                     }
-                };
+                });
             }
+        }
+
+        if (lockboxBalanceFilters.length === 1) {
+            Object.assign(filter, lockboxBalanceFilters[0]);
+        } else if (lockboxBalanceFilters.length > 1) {
+            filter.$and = lockboxBalanceFilters;
         }
 
         return filter;
@@ -141,7 +179,8 @@ export class MongoWalletAdapter implements WalletPersistenceAdapter {
 
     private buildDeltaPipeline(delta: WalletDelta): Record<string, unknown>[] {
         const setStage: Record<string, unknown> = {
-            updatedAt: '$$NOW'
+            updatedAt: '$$NOW',
+            lastUpdated: { $toLong: '$$NOW' }
         };
 
         for (const field of WALLET_CURRENCY_FIELDS) {
@@ -172,7 +211,7 @@ export class MongoWalletAdapter implements WalletPersistenceAdapter {
             setStage.lockboxes = lockboxesExpression;
         }
 
-        if (Object.keys(setStage).length === 1 && setStage.updatedAt) {
+        if (Object.keys(setStage).length === 2 && setStage.updatedAt && setStage.lastUpdated) {
             return [];
         }
 

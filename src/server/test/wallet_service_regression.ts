@@ -5,10 +5,12 @@ import { WalletService } from '../database/WalletService';
 import {
     applyWalletSnapshot,
     createWalletDocument,
-    getCharacterNameKey,
+    createWalletOwnerIdentity,
+    getWalletDocumentId,
     normalizeWalletDocument,
     WalletDelta,
-    WalletDocument
+    WalletDocument,
+    WalletOwnerIdentity
 } from '../database/WalletTypes';
 
 class MemoryWalletAdapter implements WalletPersistenceAdapter {
@@ -18,20 +20,20 @@ class MemoryWalletAdapter implements WalletPersistenceAdapter {
 
     async close(): Promise<void> {}
 
-    async getOrCreateWallet(userId: number, character: Character): Promise<WalletDocument> {
-        const key = this.getKey(userId, character);
+    async getOrCreateWallet(identity: WalletOwnerIdentity, character: Character): Promise<WalletDocument> {
+        const key = this.getKey(identity, character);
         const existing = this.wallets.get(key);
         if (existing) {
             return normalizeWalletDocument(existing);
         }
 
-        const document = createWalletDocument(userId, character);
+        const document = createWalletDocument(identity, character);
         this.wallets.set(key, document);
         return normalizeWalletDocument(document);
     }
 
-    async applyDelta(userId: number, character: Character, delta: WalletDelta): Promise<WalletDocument | null> {
-        const key = this.getKey(userId, character);
+    async applyDelta(identity: WalletOwnerIdentity, character: Character, delta: WalletDelta): Promise<WalletDocument | null> {
+        const key = this.getKey(identity, character);
         const existing = this.wallets.get(key);
         if (!existing) {
             return null;
@@ -65,12 +67,17 @@ class MemoryWalletAdapter implements WalletPersistenceAdapter {
         return normalizeWalletDocument(next);
     }
 
-    seed(userId: number, characterName: string, document: WalletDocument): void {
-        this.wallets.set(`${userId}:${getCharacterNameKey(characterName)}`, normalizeWalletDocument(document));
+    seed(identity: WalletOwnerIdentity, characterName: string, document: WalletDocument): void {
+        this.wallets.set(getWalletDocumentId(identity, characterName), normalizeWalletDocument(document));
     }
 
-    private getKey(userId: number, character: Character): string {
-        return `${userId}:${getCharacterNameKey(character)}`;
+    getDocument(identity: WalletOwnerIdentity, characterName: string): WalletDocument | null {
+        const document = this.wallets.get(getWalletDocumentId(identity, characterName));
+        return document ? normalizeWalletDocument(document) : null;
+    }
+
+    private getKey(identity: WalletOwnerIdentity, character: Character): string {
+        return getWalletDocumentId(identity, character);
     }
 }
 
@@ -105,7 +112,8 @@ async function testLoadWalletOverlay(): Promise<void> {
     const adapter = new MemoryWalletAdapter();
     WalletService.configureForTests(adapter, true);
     const character = createCharacter();
-    const document = createWalletDocument(44, character);
+    const identity = createWalletOwnerIdentity(44);
+    const document = createWalletDocument(identity, character);
     applyWalletSnapshot(document as unknown as Character, {
         gold: 999,
         mammothIdols: 88,
@@ -115,7 +123,7 @@ async function testLoadWalletOverlay(): Promise<void> {
         RoyalSigils: 44,
         lockboxes: [{ lockboxID: 1, count: 9 }]
     });
-    adapter.seed(44, character.name, document);
+    adapter.seed(identity, character.name, document);
 
     character.gold = 1;
     character.mammothIdols = 1;
@@ -125,6 +133,27 @@ async function testLoadWalletOverlay(): Promise<void> {
     assert.equal(character.mammothIdols, 88, 'Mongo wallet idols should overlay stale JSON idols');
     assert.equal(character.DragonOre, 66, 'Mongo wallet dragon ore should overlay stale JSON ore');
     assert.deepEqual(character.lockboxes, [{ lockboxID: 1, count: 9 }], 'Mongo lockbox counts should overlay stale JSON lockboxes');
+}
+
+async function testDiscordStyleWalletIdentity(): Promise<void> {
+    const adapter = new MemoryWalletAdapter();
+    const discordUserId = '285118390031351809';
+    WalletService.configureForTests(
+        adapter,
+        true,
+        async (gameUserId) => createWalletOwnerIdentity(gameUserId, discordUserId)
+    );
+    const character = createCharacter();
+
+    await WalletService.overlayWallet(44, character);
+    const document = adapter.getDocument(createWalletOwnerIdentity(44, discordUserId), character.name);
+
+    assert.ok(document, 'wallet document should be created');
+    assert.equal(document?._id, '44:wallethero', 'wallet _id should be deterministic per game account and character');
+    assert.equal(document?.userId, discordUserId, 'wallet userId should mirror the Discord bot string user id when linked');
+    assert.equal(document?.gameUserId, 44, 'wallet should retain the game account id for JSON save compatibility');
+    assert.equal(document?.discordUserId, discordUserId, 'wallet should store the Discord id only, not OAuth token data');
+    assert.equal(document?.identityProvider, 'discord', 'wallet should mark Discord-backed identity');
 }
 
 async function testAtomicSpendSucceedsAndFails(): Promise<void> {
@@ -154,6 +183,7 @@ async function testJsonFallbackWhenDisabled(): Promise<void> {
 async function main(): Promise<void> {
     await testCreateWalletFromExistingCharacter();
     await testLoadWalletOverlay();
+    await testDiscordStyleWalletIdentity();
     await testAtomicSpendSucceedsAndFails();
     await testJsonFallbackWhenDisabled();
     console.log('wallet_service_regression: ok');
