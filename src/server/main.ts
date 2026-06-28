@@ -39,6 +39,7 @@ import { GuildHandler } from './handlers/GuildHandler';
 import { ForgeHandler } from './handlers/ForgeHandler';
 import { discordSocialBridge } from './integrations/DiscordSocialBridge';
 import { ProjectInfo } from './core/ProjectInfo';
+import { WalletService } from './database/WalletService';
 import * as path from 'path';
 
 import { StaticServer } from './core/StaticServer';
@@ -233,22 +234,30 @@ router.register(0x106, SigilHandler.handleRoyalSigilStorePurchase);
 
 // Start Servers
 let policyServer: PolicyServer | null = null;
-if (Config.ENABLE_POLICY_SERVER) {
-    policyServer = new PolicyServer(Config.POLICY_PORT, Config.BIND_HOST);
-    policyServer.start();
-} else {
-    console.log(
-        `[Policy] Dedicated policy server disabled; serving socket policy inline on ${Config.BIND_HOST}:${Config.PORTS[0]}`
-    );
+const staticServer = new StaticServer(Config.STATIC_PORT, '../client/content/localhost', Config.BIND_HOST);
+const gameServer = new GameServer(Config.PORTS[0], router, Config.BIND_HOST);
+
+async function startServers(): Promise<void> {
+    await WalletService.initialize();
+
+    if (Config.ENABLE_POLICY_SERVER) {
+        policyServer = new PolicyServer(Config.POLICY_PORT, Config.BIND_HOST);
+        policyServer.start();
+    } else {
+        console.log(
+            `[Policy] Dedicated policy server disabled; serving socket policy inline on ${Config.BIND_HOST}:${Config.PORTS[0]}`
+        );
+    }
+
+    staticServer.start();
+    AILogic.start();
+    gameServer.start();
 }
 
-const staticServer = new StaticServer(Config.STATIC_PORT, '../client/content/localhost', Config.BIND_HOST);
-staticServer.start();
-
-
-const gameServer = new GameServer(Config.PORTS[0], router, Config.BIND_HOST);
-AILogic.start();
-gameServer.start();
+void startServers().catch((error) => {
+    console.error('[Wallet] Mongo wallet startup failed; refusing to start with unsafe wallet authority:', error);
+    process.exit(1);
+});
 
 let isShuttingDown = false;
 
@@ -263,7 +272,8 @@ function shutdown(signal: string, exitCode: number, onComplete?: () => void): vo
     const tasks = [
         staticServer.stop(),
         gameServer.stop(),
-        policyServer?.stop() ?? Promise.resolve()
+        policyServer?.stop() ?? Promise.resolve(),
+        WalletService.close()
     ];
 
     void Promise.allSettled(tasks).then((results) => {

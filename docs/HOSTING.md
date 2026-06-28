@@ -46,3 +46,28 @@ To start your server, run:
 ```sh
 entrypoint.sh
 ```
+
+### Optional MongoDB wallet authority
+
+Character saves, inventory, gear, missions, pets, and level state remain JSON-backed. MongoDB is used only for high-value wallet fields when explicitly enabled.
+
+Supported wallet fields:
+
+* `gold`
+* `mammothIdols`
+* `DragonKeys`
+* `DragonOre`
+* `SilverSigils`
+* `RoyalSigils`
+* lockbox counts only
+
+Example `.env`:
+
+```sh
+MONGODB_URI=mongodb+srv://user:password@example.mongodb.net/?retryWrites=true&w=majority
+MONGODB_DB_NAME=dungeon_blitz_r
+MONGODB_WALLET_COLLECTION=wallets
+ENABLE_MONGO_WALLET=true
+```
+
+`MONGODB_DB_NAME` defaults to `dungeon_blitz_r`, and `MONGODB_WALLET_COLLECTION` defaults to `wallets`. `ENABLE_MONGO_WALLET` defaults to true when `MONGODB_URI` is present and false otherwise. If Mongo wallet mode is enabled but the server cannot connect at startup, the game server refuses to start instead of falling back to stale JSON wallet values.
