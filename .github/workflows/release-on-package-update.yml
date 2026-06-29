@@ -24,7 +24,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.pkg.outputs.version }}
-          name: dungeon-blitz-r - v${{ steps.pkg.outputs.version }}
+          name: v${{ steps.pkg.outputs.version }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
