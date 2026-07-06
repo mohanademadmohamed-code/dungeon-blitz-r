@@ -10,6 +10,7 @@ import { CombatHandler } from '../handlers/CombatHandler';
 import { LevelHandler } from '../handlers/LevelHandler';
 import { MissionHandler } from '../handlers/MissionHandler';
 import { RewardHandler } from '../handlers/RewardHandler';
+import { LootDepthRewardHandler } from '../handlers/LootDepthRewardHandler';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 import { BitReader } from '../network/protocol/bitReader';
 import { getLevelScopeKey } from '../core/LevelScope';
@@ -26,6 +27,7 @@ type FakeClient = {
     currentLevel: string;
     levelInstanceId: string;
     syncAnchorStartedAt: number;
+    worldEnteredAt: number;
     currentRoomId: number;
     playerSpawned: boolean;
     clientEntID: number;
@@ -34,6 +36,7 @@ type FakeClient = {
     processedRewardSources: Set<string>;
     pendingLoot: Map<number, any>;
     startedRoomEvents: Set<string>;
+    triggeredLevelStates: Set<string>;
     knownEntityIds: Set<number>;
     entityIdAliases: Map<number, number>;
     sharedEntityRemoteUpdateDeferredIds: Set<number>;
@@ -72,6 +75,7 @@ function createFakeClient(name: string, token: number, roomId: number): FakeClie
         currentLevel: 'AC_Mission1',
         levelInstanceId: '59395',
         syncAnchorStartedAt: 59395,
+        worldEnteredAt: token,
         currentRoomId: roomId,
         playerSpawned: true,
         clientEntID: token,
@@ -80,6 +84,7 @@ function createFakeClient(name: string, token: number, roomId: number): FakeClie
         processedRewardSources: new Set<string>(),
         pendingLoot: new Map<number, any>(),
         startedRoomEvents: new Set<string>(),
+        triggeredLevelStates: new Set<string>(),
         knownEntityIds: new Set<number>(),
         entityIdAliases: new Map<number, number>(),
         sharedEntityRemoteUpdateDeferredIds: new Set<number>(),
@@ -176,6 +181,19 @@ function buildPowerHitPayload(targetId: number, sourceId: number, damage: number
     return bb.toBuffer();
 }
 
+function buildPowerCastPayload(sourceId: number, powerId: number = 77): Buffer {
+    const bb = new BitBuffer(false);
+    bb.writeMethod4(sourceId);
+    bb.writeMethod4(powerId);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    return bb.toBuffer();
+}
+
 function buildHpDeltaPayload(entityId: number, delta: number): Buffer {
     const bb = new BitBuffer(false);
     bb.writeMethod4(entityId);
@@ -187,6 +205,22 @@ function buildBuffStatePayload(entityId: number, buffId: number = 17): Buffer {
     const bb = new BitBuffer(false);
     bb.writeMethod4(entityId);
     bb.writeMethod4(buffId);
+    return bb.toBuffer();
+}
+
+function buildEntityStatePayload(entityId: number, entState: number): Buffer {
+    const bb = new BitBuffer(false);
+    bb.writeMethod4(entityId);
+    bb.writeMethod45(0);
+    bb.writeMethod45(0);
+    bb.writeMethod45(0);
+    bb.writeMethod6(entState, 2);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
     return bb.toBuffer();
 }
 
@@ -257,6 +291,31 @@ function parseEntityState(payload: Buffer): { entityId: number; entState: number
 function parseDestroyEntity(payload: Buffer): number {
     const br = new BitReader(payload);
     return br.readMethod4();
+}
+
+function parseLootdropPacket(payload: Buffer): { kind: string; lootdropId: number; x: number; y: number; amount: number; tier?: number } {
+    const br = new BitReader(payload);
+    const lootdropId = br.readMethod4();
+    const x = br.readMethod45();
+    const y = br.readMethod45();
+
+    if (br.readMethod15()) {
+        const amount = br.readMethod6(11);
+        const tier = br.readMethod6(2);
+        return { kind: 'gear', lootdropId, x, y, amount, tier };
+    }
+    if (br.readMethod15()) {
+        return { kind: 'material', lootdropId, x, y, amount: br.readMethod4() };
+    }
+    if (br.readMethod15()) {
+        return { kind: 'gold', lootdropId, x, y, amount: br.readMethod4() };
+    }
+    if (br.readMethod15()) {
+        return { kind: 'health', lootdropId, x, y, amount: br.readMethod4() };
+    }
+
+    br.readMethod15();
+    return { kind: 'dye', lootdropId, x, y, amount: br.readMethod4() };
 }
 
 function parseRoomUnlock(payload: Buffer): number {
@@ -678,6 +737,42 @@ function testAcMission1LegacyEnemyRewardPacketDoesNotSpawnLootBeforeCanonicalDea
     assert.equal(Math.round(Number(canonical.hp ?? 0)) > 0, true, 'blocking legacy reward should leave canonical HP above zero');
 }
 
+function testLootDepthOrderingPreservesGearPickupFloorY(): void {
+    const rogue = createFakeClient('AlexMercer', 59395, 2);
+    rogue.currentLevel = 'TutorialDungeon';
+    rogue.character.CurrentLevel = { name: 'TutorialDungeon', x: 3000, y: 1200 };
+    attachPlayer(rogue);
+    rogue.entities.set(7001, {
+        id: 7001,
+        name: 'GoblinBoss1',
+        isPlayer: false,
+        team: EntityTeam.ENEMY,
+        x: 3000,
+        y: 1200,
+        entState: EntityState.DEAD
+    });
+
+    const originalRandom = Math.random;
+    Math.random = () => 0.5;
+    try {
+        LootDepthRewardHandler.handleGrantReward(rogue as never, buildGrantRewardPayload(7001, rogue.clientEntID, 4, 0));
+    } finally {
+        Math.random = originalRandom;
+    }
+
+    const lootdrops = rogue.sentPackets
+        .filter((packet) => packet.id === 0x32)
+        .map((packet) => parseLootdropPacket(packet.payload));
+    const gearDrop = lootdrops.find((drop) => drop.kind === 'gear');
+
+    assert.ok(gearDrop, 'deterministic GoblinBoss1 reward should create a gear lootdrop');
+    assert.equal(
+        gearDrop!.y,
+        1200,
+        'loot depth ordering must not move gear below its pickup floor Y'
+    );
+}
+
 function testAcMission1DestroyedDragonDoesNotRespawnOnRejoin(): void {
     const rogue = createFakeClient('AlexMercer', 59395, 2);
     const rejoin = createFakeClient('Neodevils', 45890, 2);
@@ -714,18 +809,113 @@ function testAcMission1DestroyedDragonDoesNotRespawnOnRejoin(): void {
     );
     assert.equal(
         rejoin.sentPackets.some((packet) => packet.id === 0x78 && parseHpDelta(packet.payload).entityId === 10999999 && parseHpDelta(packet.payload).delta < 0),
-        true,
-        'rejoined local dragon should receive authoritative zero HP on its local id'
+        false,
+        'rejoined local dragon should not receive a HP death correction that can replay death presentation'
     );
     assert.equal(
         rejoin.sentPackets.some((packet) => packet.id === 0x07 && parseEntityState(packet.payload).entityId === 10999999 && parseEntityState(packet.payload).entState === EntityState.DEAD),
-        true,
-        'rejoined local dragon should be forced into DEAD state'
+        false,
+        'rejoined local dragon should not be forced into DEAD state after it was already dead before join'
     );
     assert.equal(
         rejoin.sentPackets.some((packet) => packet.id === 0x0D && parseDestroyEntity(packet.payload) === 10999999),
         true,
         'rejoined local dragon should be destroyed locally instead of staying alive'
+    );
+
+    // A player who joins the party mid-run reports a different currentRoomId,
+    // so their spawnKey differs from the tombstone's in the room component.
+    // The dead enemy must still stay dead for the whole instance.
+    const lateJoiner = createFakeClient('LateJoiner', 77777, 5);
+    setParty(rogue, rejoin, lateJoiner);
+    attachPlayer(lateJoiner);
+    GlobalState.sessionsByToken.set(lateJoiner.token, lateJoiner as never);
+    lateJoiner.sentPackets.length = 0;
+    attachProxy(lateJoiner, 11999999, 'AncientDragonGoldMini', 3010, 1200, 5);
+
+    assert.equal(
+        Array.from(levelMap.values()).some((entity) => !entity.isPlayer && Number(entity.team ?? 0) === EntityTeam.ENEMY),
+        false,
+        'mid-run party joiner in another room must not resurrect the dead dragon as a new canonical'
+    );
+    assert.equal(
+        lateJoiner.sentPackets.some((packet) => packet.id === 0x78 && parseHpDelta(packet.payload).entityId === 11999999 && parseHpDelta(packet.payload).delta < 0),
+        false,
+        'mid-run party joiner should not receive HP death correction for a pre-dead dragon'
+    );
+    assert.equal(
+        lateJoiner.sentPackets.some((packet) => packet.id === 0x07 && parseEntityState(packet.payload).entityId === 11999999 && parseEntityState(packet.payload).entState === EntityState.DEAD),
+        false,
+        'mid-run party joiner should not see a DEAD state replay for the pre-dead dragon'
+    );
+    assert.equal(
+        lateJoiner.sentPackets.some((packet) => packet.id === 0x0D && parseDestroyEntity(packet.payload) === 11999999),
+        true,
+        'mid-run party joiner local dragon copy should be cleaned up instead of staying alive'
+    );
+    GlobalState.sessionsByToken.delete(lateJoiner.token);
+}
+
+async function testAcMission1LateDeadDragonSourcePacketsStayLocal(): Promise<void> {
+    const rogue = createFakeClient('AlexMercer', 12704, 0);
+    const mage = createFakeClient('Neodevils', 38895, 0);
+    setParty(rogue, mage);
+    attachPlayer(rogue);
+    attachPlayer(mage);
+    GlobalState.sessionsByToken.set(rogue.token, rogue as never);
+    GlobalState.sessionsByToken.set(mage.token, mage as never);
+
+    const scope = getLevelScopeKey(rogue.currentLevel, rogue.levelInstanceId);
+    attachProxy(rogue, 10432928, 'AncientDragonGoldMini', -1475, -1875, 0);
+    attachProxy(mage, 15374319, 'AncientDragonGoldMini', -1475, -1875, 0);
+    const canonical = GlobalState.levelEntities.get(scope)?.get(10432928);
+    assert.ok(canonical, 'canonical dragon should exist before lethal hit');
+
+    await CombatHandler.handlePowerHit(mage as never, buildPowerHitPayload(15374319, mage.clientEntID, Math.round(Number(canonical.hp ?? 0)) + 1));
+    const deathFinalizedAt = Math.max(1, Math.round(Number(canonical.deathFinalizedAt ?? 0)));
+    assert.equal(canonical.dead, true, 'canonical dragon should be dead before stale source packets arrive');
+
+    const late = createFakeClient('LateJoiner', 77777, 5);
+    late.worldEnteredAt = deathFinalizedAt + 1_000;
+    setParty(rogue, mage, late);
+    attachPlayer(late);
+    GlobalState.sessionsByToken.set(late.token, late as never);
+    attachProxy(late, 15374319, 'AncientDragonGoldMini', -1475, -1875, 5);
+    assert.equal(
+        EntityHandler.resolveEntityAlias(late as never, 15374319),
+        10432928,
+        'late local dragon source id should still alias to the dead canonical dragon'
+    );
+
+    rogue.sentPackets.length = 0;
+    mage.sentPackets.length = 0;
+    late.sentPackets.length = 0;
+
+    await CombatHandler.handlePowerCast(late as never, buildPowerCastPayload(15374319, 77));
+    await CombatHandler.handlePowerHit(late as never, buildPowerHitPayload(rogue.clientEntID, 15374319, 5188));
+    LevelHandler.handleEntityIncrementalUpdate(late as never, buildEntityStatePayload(15374319, EntityState.DEAD));
+
+    assert.equal(rogue.sentPackets.some((packet) => packet.id === 0x09), false, 'dead late hostile source must not relay power-cast to owner');
+    assert.equal(rogue.sentPackets.some((packet) => packet.id === 0x0A), false, 'dead late hostile source must not relay power-hit to owner');
+    assert.equal(
+        rogue.sentPackets.some((packet) => packet.id === 0x07 && parseEntityState(packet.payload).entityId === 10432928),
+        false,
+        'dead late hostile state packet must not replay owner death state or resweep'
+    );
+    assert.equal(
+        late.sentPackets.some((packet) => packet.id === 0x0D && parseDestroyEntity(packet.payload) === 15374319),
+        true,
+        'late stale hostile source should receive destroy-only cleanup'
+    );
+    assert.equal(
+        late.sentPackets.some((packet) => packet.id === 0x78 && parseHpDelta(packet.payload).entityId === 15374319),
+        false,
+        'late stale hostile source cleanup must not replay HP death animation'
+    );
+    assert.equal(
+        late.sentPackets.some((packet) => packet.id === 0x07 && parseEntityState(packet.payload).entityId === 15374319),
+        false,
+        'late stale hostile source cleanup must not replay DEAD state animation'
     );
 }
 
@@ -790,6 +980,89 @@ function testAcMission1CutsceneLocksServerAuthorityHostiles(): void {
 
     CombatHandler.handleCharRegen(mage as never, buildHpDeltaPayload(10859330, -50000));
     assert.equal(canonical.hp, hpBefore, 'HP report from a targetable-looking local proxy must not damage untargetable canonical dragon');
+}
+
+function testAcMission1LateJoinerSkipsMiniBossCutsceneAfterDeath(): void {
+    (EntityHandler as any).serverAuthoritySeededScopes?.clear?.();
+    (EntityHandler as any).serverAuthorityDestroyedIdsByScope?.clear?.();
+    (EntityHandler as any).serverAuthorityDestroyedFingerprintsByScope?.clear?.();
+
+    const rogue = createFakeClient('AlexMercer', 59395, 2);
+    const mage = createFakeClient('Neodevils', 45890, 2);
+    setParty(rogue, mage);
+    attachPlayer(rogue);
+    GlobalState.sessionsByToken.set(rogue.token, rogue as never);
+
+    const scope = getLevelScopeKey(rogue.currentLevel, rogue.levelInstanceId);
+    const levelMap = GlobalState.levelEntities.get(scope);
+    assert.ok(levelMap, 'test scope should have a level map');
+
+    attachProxy(rogue, 4712451, 'AncientDragonGoldMini', 3000, 1200, 2);
+    const canonical = levelMap.get(4712451);
+    assert.ok(canonical, 'canonical dragon should exist before the late-join sync check');
+
+    rogue.sentPackets.length = 0;
+    (LevelHandler as any).maybeSyncDeepgardDragonMiniBossAlreadyDefeated(rogue);
+    assert.equal(
+        rogue.sentPackets.some((packet) => packet.id === 0x40),
+        false,
+        'alive mini-boss must not produce the already-defeated room state'
+    );
+
+    canonical.hp = 0;
+    canonical.dead = true;
+    canonical.entState = EntityState.DEAD;
+    (EntityHandler as any).noteServerAuthorityHostileDestroyed(scope, 4712451, canonical);
+    levelMap.delete(4712451);
+
+    attachPlayer(mage);
+    GlobalState.sessionsByToken.set(mage.token, mage as never);
+    mage.sentPackets.length = 0;
+
+    // The mage's client reports its locally spawned copy of the dead dragon while the
+    // level is still loading (before any movement packet). The tombstone suppression
+    // must immediately push the already-defeated room trigger so the room script can
+    // skip the cutscene before its first phase tick.
+    attachProxy(mage, 10859330, 'AncientDragonGoldMini', 3010, 1200, 2);
+
+    assert.equal(
+        mage.sentPackets.some((packet) => packet.id === 0x0D),
+        true,
+        'late joiner local dragon copy should still be destroy-suppressed'
+    );
+    const roomStates = mage.sentPackets
+        .filter((packet) => packet.id === 0x40)
+        .map((packet) => new BitReader(packet.payload).readMethod26());
+    assert.deepEqual(
+        roomStates,
+        ['2003367144^Trigger^am_Trigger_MiniBossDone'],
+        'late joiner must receive exactly one already-defeated room trigger state at proxy-report time'
+    );
+    assert.equal(
+        mage.triggeredLevelStates.has('AC_Mission1:2003367144:am_Trigger_MiniBossDone'),
+        true,
+        'late joiner must remember the already-defeated sync so it is not resent'
+    );
+    assert.equal(
+        mage.triggeredLevelStates.has('AC_Mission1:2003367144:am_Trigger_Cutscene'),
+        true,
+        'late joiner must be marked as having consumed the mini-boss intro cutscene trigger'
+    );
+
+    mage.sentPackets.length = 0;
+    (LevelHandler as any).maybeSyncDeepgardDragonMiniBossAlreadyDefeated(mage);
+    assert.equal(mage.sentPackets.length, 0, 'already-defeated sync must be idempotent per client');
+
+    (LevelHandler as any).maybeTriggerDeepgardDragonMiniBossIntro(mage, -3000, -2000, -2000);
+    assert.equal(
+        mage.sentPackets.some(
+            (packet) =>
+                packet.id === 0x40 &&
+                new BitReader(packet.payload).readMethod26().includes('am_Trigger_Cutscene')
+        ),
+        false,
+        'late joiner crossing the gate trigger must not start the mini-boss cutscene after its death'
+    );
 }
 
 async function main(): Promise<void> {
@@ -880,7 +1153,23 @@ async function main(): Promise<void> {
         GlobalState.deadServerAuthorityHostilesByScope.clear();
         (EntityHandler as any).serverAuthorityDestroyedIdsByScope.clear();
         (EntityHandler as any).serverAuthorityDestroyedFingerprintsByScope.clear();
+        testLootDepthOrderingPreservesGearPickupFloorY();
+        GlobalState.levelEntities.clear();
+        GlobalState.sessionsByToken.clear();
+        GlobalState.partyByMember.clear();
+        GlobalState.partyGroups.clear();
+        GlobalState.deadServerAuthorityHostilesByScope.clear();
+        (EntityHandler as any).serverAuthorityDestroyedIdsByScope.clear();
+        (EntityHandler as any).serverAuthorityDestroyedFingerprintsByScope.clear();
         testAcMission1DestroyedDragonDoesNotRespawnOnRejoin();
+        GlobalState.levelEntities.clear();
+        GlobalState.sessionsByToken.clear();
+        GlobalState.partyByMember.clear();
+        GlobalState.partyGroups.clear();
+        GlobalState.deadServerAuthorityHostilesByScope.clear();
+        (EntityHandler as any).serverAuthorityDestroyedIdsByScope.clear();
+        (EntityHandler as any).serverAuthorityDestroyedFingerprintsByScope.clear();
+        await testAcMission1LateDeadDragonSourcePacketsStayLocal();
         GlobalState.levelEntities.clear();
         GlobalState.sessionsByToken.clear();
         GlobalState.partyByMember.clear();
@@ -897,6 +1186,12 @@ async function main(): Promise<void> {
         (EntityHandler as any).serverAuthorityDestroyedIdsByScope.clear();
         (EntityHandler as any).serverAuthorityDestroyedFingerprintsByScope.clear();
         testAcMission1CutsceneLocksServerAuthorityHostiles();
+        GlobalState.levelEntities.clear();
+        GlobalState.sessionsByToken.clear();
+        GlobalState.partyByMember.clear();
+        GlobalState.partyGroups.clear();
+        GlobalState.deadServerAuthorityHostilesByScope.clear();
+        testAcMission1LateJoinerSkipsMiniBossCutsceneAfterDeath();
         console.log('ac_mission1_server_authority_regression: ok');
     } finally {
         GlobalState.levelEntities = levelEntities;

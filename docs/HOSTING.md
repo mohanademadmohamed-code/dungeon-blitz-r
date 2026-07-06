@@ -47,6 +47,26 @@ To start your server, run:
 entrypoint.sh
 ```
 
+### Required Discord OAuth account bootstrap
+
+Password-created accounts are disabled for new users. Players must bootstrap or sync their game account through Discord OAuth first, then set a password for the Discord-linked account.
+
+Required `.env` values:
+
+```sh
+PUBLIC_BASE_URL=https://your-game-host.example
+DISCORD_CLIENT_ID=your_discord_application_id
+DISCORD_CLIENT_SECRET=your_discord_client_secret
+DISCORD_REDIRECT_URI=https://your-game-host.example/api/discord-linked-roles/callback
+DISCORD_ACCOUNT_LINK_STATE_SECRET=hex_or_long_random_secret
+```
+
+Discord OAuth requests the `identify email` scope. Account creation requires a verified Discord email. New OAuth-created accounts use the verified Discord email as the game account email, and Discord profile fields are stored only as account metadata. Password login checks the account email and password hash; Discord metadata is not required for password authentication.
+
+The game host page tries the Discord desktop client protocol first because older FlashBrowser builds cannot render Discord's modern OAuth web page. If the Discord client does not open, copy the shown OAuth URL into a modern external browser.
+
+Do not store Discord client secrets, bot tokens, MongoDB credentials, passwords, OAuth tokens, or session secrets in committed files.
+
 ### Optional MongoDB wallet authority
 
 Character saves, inventory, gear, missions, pets, and level state remain JSON-backed. MongoDB is used only for high-value wallet fields when explicitly enabled.

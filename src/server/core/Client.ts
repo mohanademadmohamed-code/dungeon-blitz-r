@@ -227,6 +227,8 @@ export class Client {
     public deferredCharacterSaveReason: string = "";
     public activeDungeonCutsceneScope: string = "";
     public activeDungeonCutsceneRoomId: number = 0;
+    public activeDungeonCutsceneJoinedAtDialogIndex: number = 0;
+    public activeDungeonCutsceneLocalDialogIndex: number = 0;
     public lastDungeonCutsceneStartScope: string = "";
     public lastDungeonCutsceneStartAt: number = 0;
     public lastDungeonCutsceneEndScope: string = "";
@@ -246,6 +248,9 @@ export class Client {
         this.socket.on('end', () => this.onEnd());
         this.socket.on('close', (hadError: boolean) => this.onClose(hadError));
         this.socket.on('error', (err: Error) => this.onError(err));
+
+        const { GlobalState } = require('./GlobalState') as typeof import('./GlobalState');
+        GlobalState.clients.add(this);
     }
 
     private onData(data: Buffer): void {
@@ -488,6 +493,8 @@ export class Client {
         this.pendingDungeonCompletionWaitForCutsceneEnd = false;
         this.activeDungeonCutsceneScope = "";
         this.activeDungeonCutsceneRoomId = 0;
+        this.activeDungeonCutsceneJoinedAtDialogIndex = 0;
+        this.activeDungeonCutsceneLocalDialogIndex = 0;
         this.lastDungeonCutsceneStartScope = "";
         this.lastDungeonCutsceneStartAt = 0;
         this.lastDungeonCutsceneEndScope = "";
@@ -782,6 +789,7 @@ export class Client {
         }
 
         this.cleanupSessionState(snapshot, transferInProgress);
+        GlobalState.clients.delete(this);
 
         console.log(
             `[Client] Disconnected: ${addr} hadError=${hadError} bytesIn=${this.rawBytesIn} bytesOut=${this.rawBytesOut} authenticated=${snapshot.authenticated} token=${snapshot.token} char=${snapshot.characterName || '(none)'}`
