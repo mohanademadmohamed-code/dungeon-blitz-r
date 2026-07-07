@@ -1,5 +1,4 @@
 import { GlobalState, SharedDungeonProgressState } from './GlobalState';
-import { DungeonSpawnLoader, DungeonSpawnConfig } from '../data/DungeonSpawnLoader';
 import { getActiveDungeonRunStats } from './DungeonRunStats';
 import { LevelConfig } from './LevelConfig';
 import { getClientLevelScope, getScopeLevelName } from './LevelScope';
@@ -32,49 +31,11 @@ function clampProgress(value: unknown): number {
     return Math.max(0, Math.min(100, Math.round(progress)));
 }
 
-function getRequiredForClearProgressConfig(levelName: string | null | undefined): DungeonSpawnConfig | null {
-    return DungeonSpawnLoader.getSpawnConfigForLevel(LevelConfig.normalizeLevelName(levelName));
-}
-
-function usesRequiredForClearProgress(levelScope: string | null | undefined, levelName: string | null | undefined): boolean {
-    if (getRequiredForClearProgressConfig(levelName)) {
-        return true;
-    }
-
-    const levelMap = GlobalState.levelEntities.get(String(levelScope ?? '').trim());
-    for (const entity of levelMap?.values() ?? []) {
-        if (entity?.requiredForClear === true) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-function logRequiredForClearProgress(
-    levelScope: string,
-    levelName: string | null | undefined,
-    totals: { total: number; defeated: number },
-    progress: number
-): void {
-    const config = getRequiredForClearProgressConfig(levelName);
-    if (!config) {
-        return;
-    }
-
-    console.log(
-        `[DungeonProgress] level=${config.levelId || config.levelName} levelName=${config.levelName} dungeon="${config.dungeonName}" scope=${levelScope} totalRequired=${totals.total} deadRequired=${totals.defeated} percent=${progress}`
-    );
-}
-
 export function usesSharedDungeonProgress(levelName: string | null | undefined): boolean {
     const normalizedLevel = LevelConfig.normalizeLevelName(levelName);
     return Boolean(normalizedLevel) &&
         !SHARED_DUNGEON_PROGRESS_EXCLUDED_LEVELS.has(normalizedLevel) &&
-        (
-            isWolfsEndDungeonLevel(normalizedLevel) ||
-            Boolean(getRequiredForClearProgressConfig(normalizedLevel))
-        );
+        isWolfsEndDungeonLevel(normalizedLevel);
 }
 
 export function getSharedDungeonInitialProgress(levelName: string | null | undefined): number {
@@ -173,10 +134,6 @@ function refreshSharedDungeonLiveStats(
 }
 
 function isSharedDungeonTrackedHostile(entity: any): boolean {
-    if (entity?.requiredForClear === true && isDungeonStatsHostile(entity)) {
-        return true;
-    }
-
     return Boolean(entity?.clientSpawned) && isDungeonStatsHostile(entity);
 }
 
@@ -343,15 +300,6 @@ export function recomputeSharedDungeonProgress(levelScope: string | null | undef
 
     const totals = getSharedDungeonProgressTotals(levelScope);
     const levelName = getScopeLevelName(levelScope);
-    if (usesRequiredForClearProgress(scopeKey, levelName)) {
-        state.progress = totals.total > 0
-            ? clampProgress(Math.floor((totals.defeated / totals.total) * 100))
-            : 0;
-        logRequiredForClearProgress(scopeKey, levelName, totals, state.progress);
-        refreshSharedDungeonLiveStats(state, scopeKey);
-        return state;
-    }
-
     if (usesSharedDungeonProgress(levelName)) {
         const initialProgress = getSharedDungeonInitialProgress(levelName);
         state.progress = totals.total > 0
