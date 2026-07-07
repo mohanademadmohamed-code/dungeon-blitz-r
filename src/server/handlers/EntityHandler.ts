@@ -1,4 +1,5 @@
 import { NpcLoader, NpcDef } from '../data/NpcLoader';
+import { DungeonSpawnLoader, DungeonSpawnConfig } from '../data/DungeonSpawnLoader';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 import { Client, clearClientSpawnFallbackTimer, createKeepTutorialState } from '../core/Client';
 import { BitReader } from '../network/protocol/bitReader';
@@ -53,7 +54,8 @@ export class EntityHandler {
     ]);
     private static readonly SERVER_AUTHORITY_HOSTILE_LEVELS = new Set<string>([
         'AC_Mission1',
-        'JC_Mini1Hard'
+        'JC_Mini1Hard',
+        'JC_Mini2'
     ]);
     private static readonly FIRST_SIGHT_SERVER_AUTHORITY_HOSTILE_LEVELS = new Set<string>([
         'AC_Mission1'
@@ -109,6 +111,68 @@ export class EntityHandler {
     static usesCanonicalVisibleServerAuthorityHostiles(levelName: string | null | undefined): boolean {
         return EntityHandler.FIRST_SIGHT_SERVER_AUTHORITY_HOSTILE_LEVELS.has(
             LevelConfig.normalizeLevelName(getScopeLevelName(String(levelName ?? '')))
+        );
+    }
+
+    private static getDungeonSpawnConfigForLog(levelNameOrScope: string | null | undefined): DungeonSpawnConfig | null {
+        const levelName = LevelConfig.normalizeLevelName(getScopeLevelName(String(levelNameOrScope ?? '')));
+        return DungeonSpawnLoader.getSpawnConfigForLevel(levelName);
+    }
+
+    private static logDungeonSpawnServerSnapshot(
+        levelName: string,
+        levelScope: string,
+        client: Client,
+        levelMap: Map<number, any>
+    ): void {
+        const config = EntityHandler.getDungeonSpawnConfigForLog(levelName);
+        if (!config) {
+            return;
+        }
+
+        let live = 0;
+        let dead = 0;
+        for (const entity of levelMap.values()) {
+            if (!entity || entity.isPlayer || Number(entity.team ?? 0) !== EntityTeam.ENEMY || !entity.generatedFromScript) {
+                continue;
+            }
+
+            const isDead = Boolean(entity.dead) ||
+                Number(entity.entState ?? EntityState.ACTIVE) === EntityState.DEAD ||
+                Math.round(Number(entity.hp ?? 1)) <= 0;
+            if (isDead) {
+                dead++;
+            } else {
+                live++;
+            }
+        }
+
+        console.log(
+            `[DungeonSpawnServer] snapshot level=${config.levelId || config.levelName} levelName=${config.levelName} dungeon="${config.dungeonName}" scope=${levelScope} viewer=${String(client.character?.name ?? '')} live=${live} dead=${dead} total=${live + dead}`
+        );
+    }
+
+    private static logClientAuthorityDungeonSpawnProxy(
+        client: Client,
+        levelName: string | null | undefined,
+        entity: any,
+        localId: number,
+        canonical: any,
+        canonicalId: number,
+        result: string
+    ): void {
+        const config = EntityHandler.getDungeonSpawnConfigForLog(levelName);
+        if (!config) {
+            return;
+        }
+
+        const type = String(entity?.name ?? entity?.EntName ?? canonical?.name ?? '').replace(/\s+/g, '_');
+        const spawnKey = String(canonical?.spawnKey ?? entity?.spawnKey ?? '');
+        console.log(
+            `[ClientAuthority] local hostile spawn blocked level=${config.levelId || config.levelName} levelName=${config.levelName} dungeon="${config.dungeonName}" viewer=${String(client.character?.name ?? '')} rawLocalId=${localId} type=${type} pos=${Math.round(Number(entity?.x ?? 0))},${Math.round(Number(entity?.y ?? 0))} result=${result}`
+        );
+        console.log(
+            `[ClientAuthority] server enemy proxy created level=${config.levelId || config.levelName} levelName=${config.levelName} dungeon="${config.dungeonName}" viewer=${String(client.character?.name ?? '')} rawLocalId=${localId} canonicalId=${canonicalId} spawnKey=${spawnKey} result=${result}`
         );
     }
 
@@ -332,12 +396,34 @@ export class EntityHandler {
         const entityProps = {
             ...Entity.fromNpc(npc),
             clientSpawned: false,
+            canonicalId: Number(npc.canonicalId ?? npc.id ?? 0),
+            entType: String(npc.entType ?? npc.name ?? ''),
+            spawnKey: String(npc.spawnKey ?? ''),
+            spawnIndex: Number(npc.spawnIndex ?? 0),
+            levelId: String(npc.levelId ?? ''),
+            levelName: String(npc.levelName ?? levelName),
+            dungeonName: String(npc.dungeonName ?? ''),
+            generatedFromScript: Boolean(npc.generatedFromScript),
+            spawnSource: String(npc.spawnSource ?? ''),
+            requiredForClear: Boolean(npc.requiredForClear),
             boss: Boolean(npc.boss),
+            miniboss: Boolean(npc.miniboss),
             roomBoss: Boolean(npc.roomBoss),
             isRoomBoss: Boolean(npc.isRoomBoss ?? npc.roomBoss),
             roomBossName: String(npc.roomBossName ?? npc.displayName ?? ''),
             displayName: String(npc.displayName ?? npc.roomBossName ?? ''),
-            sourceRoom: String(npc.sourceRoom ?? '')
+            scripted: Boolean(npc.scripted),
+            sourceRoom: String(npc.sourceRoom ?? ''),
+            sourceVar: String(npc.sourceVar ?? ''),
+            sourceLine: Number(npc.sourceLine ?? 0),
+            sourceSymbolId: Number(npc.sourceSymbolId ?? 0),
+            sourceCharacterId: Number(npc.sourceCharacterId ?? 0),
+            sourceSwf: String(npc.sourceSwf ?? ''),
+            sourceLevelClass: String(npc.sourceLevelClass ?? ''),
+            sourceExtractor: String(npc.sourceExtractor ?? ''),
+            groupId: npc.groupId ?? null,
+            waveId: npc.waveId ?? null,
+            triggerId: npc.triggerId ?? null
         } as EntityProps & Record<string, unknown>;
         EntityHandler.applyRuntimeDungeonEntityLevel(client, levelName, entityProps);
         return entityProps;
@@ -354,6 +440,13 @@ export class EntityHandler {
         }
 
         const destroyedIds = EntityHandler.getServerAuthorityDestroyedIds(levelScope);
+        const dungeonSpawnConfig = EntityHandler.getDungeonSpawnConfigForLog(levelName);
+        if (dungeonSpawnConfig) {
+            console.log(
+                `[DungeonSpawnServer] init level=${dungeonSpawnConfig.levelId || dungeonSpawnConfig.levelName} levelName=${dungeonSpawnConfig.levelName} dungeon="${dungeonSpawnConfig.dungeonName}" scope=${levelScope} enemies=${dungeonSpawnConfig.enemies.length} requiredForClear=${dungeonSpawnConfig.enemies.filter((enemy) => enemy.requiredForClear).length}`
+            );
+        }
+
         for (const npc of NpcLoader.getNpcsForLevel(levelName)) {
             const npcId = Math.max(0, Math.round(Number(npc.id ?? 0)));
             if (npcId <= 0 || destroyedIds.has(npcId) || levelMap.has(npcId)) {
@@ -366,6 +459,11 @@ export class EntityHandler {
                 continue;
             }
             levelMap.set(npcId, entityProps);
+            if (dungeonSpawnConfig || (entityProps as any).generatedFromScript) {
+                console.log(
+                    `[DungeonSpawnServer] spawn level=${dungeonSpawnConfig?.levelId || (entityProps as any).levelId || levelName} levelName=${dungeonSpawnConfig?.levelName || levelName} dungeon="${dungeonSpawnConfig?.dungeonName || (entityProps as any).dungeonName || levelName}" scope=${levelScope} canonicalId=${npcId} spawnKey=${String((entityProps as any).spawnKey ?? '')} type=${String(entityProps.name ?? '')} room=${Number(entityProps.roomId ?? -1)} pos=${Math.round(Number(entityProps.x ?? 0))},${Math.round(Number(entityProps.y ?? 0))}`
+                );
+            }
             logJcMini1Authority('seed_server_hostile', {
                 entityId: npcId,
                 name: entityProps.name,
@@ -1072,6 +1170,15 @@ export class EntityHandler {
             console.log(
                 `[MultiplayerSync][spawnkey-match] scope=${levelScope} rawLocalId=${localId} canonicalId=${tombstone.canonicalId} spawnKey=${tombstone.spawnKey} result=tombstone`
             );
+            EntityHandler.logClientAuthorityDungeonSpawnProxy(
+                client,
+                levelName,
+                entity,
+                localId,
+                { spawnKey: tombstone.spawnKey },
+                tombstone.canonicalId,
+                'tombstone'
+            );
             EntityHandler.sendTombstoneDeathCorrectionOnRejoin(client, entity, localId, tombstone);
             return true;
         }
@@ -1099,6 +1206,15 @@ export class EntityHandler {
         }
         console.log(
             `[MultiplayerSync][spawnkey-match] scope=${levelScope} rawLocalId=${localId} canonicalId=${canonicalId} spawnKey=${String(entity.spawnKey ?? EntityHandler.getHostileSpawnKey(levelScope, entity))} result=active`
+        );
+        EntityHandler.logClientAuthorityDungeonSpawnProxy(
+            client,
+            levelName,
+            entity,
+            localId,
+            canonical,
+            canonicalId,
+            'active'
         );
 
         const existingLocalId = EntityHandler.findExistingServerAuthorityProxyLocalId(client, canonicalId, localId);
@@ -3973,6 +4089,12 @@ export class EntityHandler {
                 console.log(`[EntityHandler] Skipping server NPC init for client-spawn level ${levelName}`);
             } else {
                 const npcs = NpcLoader.getNpcsForLevel(levelName);
+                const dungeonSpawnConfig = EntityHandler.getDungeonSpawnConfigForLog(levelName);
+                if (dungeonSpawnConfig) {
+                    console.log(
+                        `[DungeonSpawnServer] init level=${dungeonSpawnConfig.levelId || dungeonSpawnConfig.levelName} levelName=${dungeonSpawnConfig.levelName} dungeon="${dungeonSpawnConfig.dungeonName}" scope=${getLevelScopeKey(levelName, client.levelInstanceId)} enemies=${dungeonSpawnConfig.enemies.length} requiredForClear=${dungeonSpawnConfig.enemies.filter((enemy) => enemy.requiredForClear).length}`
+                    );
+                }
                 console.log(`[EntityHandler] Initializing ${npcs.length} NPCs for ${levelName}`);
 
                 for (const npc of npcs) {
@@ -3981,9 +4103,14 @@ export class EntityHandler {
                         : {
                             ...Entity.fromNpc(npc),
                             clientSpawned: false
-                        };
+                    };
                     EntityHandler.applyRuntimeDungeonEntityLevel(client, levelName, entityProps);
                     levelMap.set(npc.id, entityProps);
+                    if (dungeonSpawnConfig || (entityProps as any).generatedFromScript) {
+                        console.log(
+                            `[DungeonSpawnServer] spawn level=${dungeonSpawnConfig?.levelId || (entityProps as any).levelId || levelName} levelName=${dungeonSpawnConfig?.levelName || levelName} dungeon="${dungeonSpawnConfig?.dungeonName || (entityProps as any).dungeonName || levelName}" scope=${getLevelScopeKey(levelName, client.levelInstanceId)} canonicalId=${Math.round(Number(npc.id ?? 0))} spawnKey=${String((entityProps as any).spawnKey ?? '')} type=${String(entityProps.name ?? '')} room=${Number(entityProps.roomId ?? -1)} pos=${Math.round(Number(entityProps.x ?? 0))},${Math.round(Number(entityProps.y ?? 0))}`
+                        );
+                    }
                 }
             }
         }
@@ -3996,6 +4123,7 @@ export class EntityHandler {
         const clientSpawnLevel = EntityHandler.usesClientSpawn(levelName);
         const serverAuthorityHostiles = EntityHandler.usesServerAuthorityHostiles(levelName);
         const canonicalVisibleServerAuthority = EntityHandler.usesCanonicalVisibleServerAuthorityHostiles(levelName);
+        EntityHandler.logDungeonSpawnServerSnapshot(levelName, getLevelScopeKey(levelName, client.levelInstanceId), client, levelMap);
         if (clientSpawnLevel) {
             const removedCount = EntityHandler.pruneStaleServerNpcs(levelMap);
             if (removedCount > 0) {
