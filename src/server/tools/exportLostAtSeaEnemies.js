@@ -33,8 +33,8 @@ const target = {
 const cueDefinitions = [
     { sourceVar: 'am_Phage1', canonicalId: 9_303_002, type: 'IntroDummyFlier', phase: 1, hpScale: 0.035 },
     { sourceVar: 'am_Phage3', canonicalId: 9_303_003, type: 'IntroDummyFlier', phase: 2, hpScale: 0.035 },
-    { sourceVar: 'am_Phage4', canonicalId: 9_303_004, type: 'IntroPsychophageBaby', phase: 3 },
-    { sourceVar: 'am_Phage6', canonicalId: 9_303_005, type: 'IntroPsychophageBaby', phase: 3 },
+    { sourceVar: 'am_Phage4', canonicalId: 9_303_004, type: 'IntroPsychophageBaby', phase: 3, hpScale: 0.035 },
+    { sourceVar: 'am_Phage6', canonicalId: 9_303_005, type: 'IntroPsychophageBaby', phase: 3, hpScale: 0.035 },
     { sourceVar: 'am_Goblin3', canonicalId: 9_303_006, type: 'IntroGoblinJumper', phase: 5 },
     { sourceVar: 'am_Goblin4', canonicalId: 9_303_007, type: 'IntroGoblinJumper', phase: 6 },
     { sourceVar: 'am_Goblin5', canonicalId: 9_303_008, type: 'IntroGoblinJumper', phase: 6 },

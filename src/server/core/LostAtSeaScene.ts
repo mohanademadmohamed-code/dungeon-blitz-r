@@ -1,5 +1,6 @@
 import { Client } from './Client';
 import {
+    DeadHostileTombstone,
     GlobalState,
     LostAtSeaRunRegistryEntry,
     LostAtSeaSceneState
@@ -50,6 +51,12 @@ const COMBAT_PHASES = new Set<number>([
     LostAtSeaScenePhase.MiddleGoblins,
     LostAtSeaScenePhase.FinalGoblins,
     LostAtSeaScenePhase.Kraken
+]);
+const SERVER_CONTROLLED_TUTORIAL_STATES = new Set<string>([
+    'am_HighlighterMove',
+    'am_HighlighterRanged',
+    'am_HighlighterHealthBar',
+    'am_HighlighterMelee'
 ]);
 
 function normalizeTimestamp(value: unknown, fallback: number): number {
@@ -201,27 +208,185 @@ export class LostAtSeaScene {
         if (!LostAtSeaScene.isLostAtSeaLevel(client.currentLevel)) {
             return false;
         }
+        const normalizedStateKey = String(stateKey ?? '').trim();
+        const value = String(_value ?? '').trim();
         const match = /^(\d+)\^SetDynamicCollision\^LostAtSeaSyncRequest$/.exec(
-            String(stateKey ?? '').trim()
+            normalizedStateKey
         );
+        if (match) {
+            const roomStateId = Number(match[1]);
+            if (!Number.isSafeInteger(roomStateId) || roomStateId < 0) {
+                return false;
+            }
+
+            if (client.lostAtSeaRoomStateId !== roomStateId) {
+                console.log(
+                    `[LostAtSeaScene] route player=${String(client.character?.name ?? '').replace(/\s+/g, '_')} ` +
+                    `scope=${getClientLevelScope(client)} roomStateId=${roomStateId}`
+                );
+            }
+            client.lostAtSeaRoomStateId = roomStateId;
+            LostAtSeaScene.sendSnapshot(client, Date.now(), roomStateId);
+            return true;
+        }
+
+        return LostAtSeaScene.handleServerSceneLevelState(client, normalizedStateKey, value);
+    }
+
+    private static handleServerSceneLevelState(client: Client, stateKey: string, value: string): boolean {
+        const match = /^(\d+)\^(SetDynamicCollision|SetTutorialState)\^(.+)$/.exec(stateKey);
         if (!match) {
             return false;
         }
-
         const roomStateId = Number(match[1]);
         if (!Number.isSafeInteger(roomStateId) || roomStateId < 0) {
             return false;
         }
+        const action = match[2];
+        const target = match[3];
+        const normalizedValue = String(value ?? '').trim().toLowerCase();
+        const isRangedCompletionCollision =
+            action === 'SetDynamicCollision' &&
+            target === 'LostAtSeaRangedTutorialComplete' &&
+            normalizedValue === 'on';
+        const isServerControlledTutorial =
+            action === 'SetTutorialState' &&
+            SERVER_CONTROLLED_TUTORIAL_STATES.has(target);
+        if (!isRangedCompletionCollision && !isServerControlledTutorial) {
+            return false;
+        }
 
-        if (client.lostAtSeaRoomStateId !== roomStateId) {
-            console.log(
-                `[LostAtSeaScene] route player=${String(client.character?.name ?? '').replace(/\s+/g, '_')} ` +
-                `scope=${getClientLevelScope(client)} roomStateId=${roomStateId}`
+        client.lostAtSeaRoomStateId = roomStateId;
+        const now = Date.now();
+        const state = LostAtSeaScene.ensureForClient(client, now);
+        if (!state) {
+            return true;
+        }
+
+        if (target === 'am_HighlighterRanged') {
+            if (normalizedValue === 'on' && state.phase === LostAtSeaScenePhase.FirstFlier) {
+                (client as Client & { lostAtSeaRangedTutorialVisible?: boolean }).lostAtSeaRangedTutorialVisible = true;
+            } else if (normalizedValue === 'off') {
+                const hadRangedTutorialVisible = Boolean(
+                    (client as Client & { lostAtSeaRangedTutorialVisible?: boolean }).lostAtSeaRangedTutorialVisible
+                );
+                (client as Client & { lostAtSeaRangedTutorialVisible?: boolean }).lostAtSeaRangedTutorialVisible = false;
+                if (hadRangedTutorialVisible) {
+                    LostAtSeaScene.completeTutorialPhase(
+                        state,
+                        LostAtSeaScenePhase.FirstFlier,
+                        now,
+                        client,
+                        'ranged_tutorial_state_off'
+                    );
+                }
+            }
+        }
+
+        if (isRangedCompletionCollision) {
+            LostAtSeaScene.completeTutorialPhase(
+                state,
+                LostAtSeaScenePhase.FirstFlier,
+                now,
+                client,
+                'ranged_tutorial_complete'
             );
         }
-        client.lostAtSeaRoomStateId = roomStateId;
-        LostAtSeaScene.sendSnapshot(client, Date.now(), roomStateId);
+
+        LostAtSeaScene.advanceScope(state.levelScope, now);
+        LostAtSeaScene.sendSnapshotToClient(client, state, now, roomStateId);
         return true;
+    }
+
+    private static completeTutorialPhase(
+        state: LostAtSeaSceneState,
+        phase: LostAtSeaScenePhase,
+        nowMs: number,
+        client: Client,
+        reason: string
+    ): boolean {
+        if (state.phase !== phase) {
+            return false;
+        }
+
+        LostAtSeaScene.refreshPhaseEntityIds(state);
+        const levelMap = GlobalState.levelEntities.get(state.levelScope);
+        if (!levelMap) {
+            return false;
+        }
+
+        const phaseEntityIds = state.phaseEntityIds[String(phase)] ?? [];
+        if (phaseEntityIds.length === 0) {
+            return false;
+        }
+
+        const now = normalizeTimestamp(nowMs, Date.now());
+        let tombstones = GlobalState.deadServerAuthorityHostilesByScope.get(state.levelScope);
+        if (!tombstones) {
+            tombstones = new Map<string, DeadHostileTombstone>();
+            GlobalState.deadServerAuthorityHostilesByScope.set(state.levelScope, tombstones);
+        }
+
+        let changed = false;
+        for (const canonicalId of phaseEntityIds) {
+            const entity = levelMap.get(canonicalId);
+            const existingTombstone = Array.from(tombstones.values()).find((entry) => entry.canonicalId === canonicalId);
+            const alreadyDefeated = Boolean(existingTombstone) || Boolean(
+                entity &&
+                (
+                    entity.dead === true ||
+                    entity.destroyed === true ||
+                    Number(entity.entState ?? EntityState.ACTIVE) === EntityState.DEAD ||
+                    (Number.isFinite(Number(entity.hp)) && Math.round(Number(entity.hp)) <= 0)
+                )
+            );
+            if (alreadyDefeated) {
+                continue;
+            }
+            if (!entity) {
+                continue;
+            }
+
+            const spawnKey = String(entity.spawnKey ?? `lost_at_sea_phase_${phase}_${canonicalId}`);
+            const deathVersion = Math.max(1, Math.round(Number(entity.deathVersion ?? 0)) + 1);
+            entity.hp = 0;
+            entity.dead = true;
+            entity.destroyed = true;
+            entity.entState = EntityState.DEAD;
+            entity.deathCause = reason;
+            entity.finalDeathReason = reason;
+            entity.killedAt = now;
+            entity.combatDeathAt = now;
+            entity.deathFinalizedAt = now;
+            entity.deathVersion = deathVersion;
+            entity.lootDropNonce = String(entity.lootDropNonce ?? '');
+            tombstones.set(spawnKey, {
+                canonicalId,
+                spawnKey,
+                levelScope: state.levelScope,
+                levelName: LOST_AT_SEA_LEVEL_NAME,
+                roomId: Math.max(-1, Math.round(Number(entity.roomId ?? LOST_AT_SEA_ROOM_ID))),
+                enemyType: String(entity.entType ?? entity.EntType ?? entity.name ?? entity.EntName ?? ''),
+                name: String(entity.name ?? entity.EntName ?? entity.entName ?? ''),
+                x: Math.round(Number(entity.x ?? entity.physPosX ?? 0) || 0),
+                y: Math.round(Number(entity.y ?? entity.physPosY ?? 0) || 0),
+                killedAt: now,
+                killerToken: Math.max(0, Math.round(Number(client.token ?? 0))),
+                lootDropNonce: String(entity.lootDropNonce ?? ''),
+                deathFinalizedAt: now,
+                dead: true,
+                destroyed: true,
+                deathVersion
+            });
+            levelMap.delete(canonicalId);
+            changed = true;
+            console.log(
+                `[LostAtSeaScene] tutorial-clear scope=${state.levelScope} phase=${phase} canonicalId=${canonicalId} ` +
+                `reason=${reason} player=${String(client.character?.name ?? '').replace(/\s+/g, '_')}`
+            );
+        }
+
+        return changed;
     }
 
     static sendSnapshot(

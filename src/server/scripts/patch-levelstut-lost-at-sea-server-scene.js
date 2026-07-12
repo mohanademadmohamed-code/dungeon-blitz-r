@@ -6,8 +6,8 @@ const CLASS_NAME = 'a_Room_TutorialBoat_R01';
 const DEFAULT_SWF = path.join('src', 'client', 'content', 'localhost', 'p', 'cbp', 'LevelsTut.swf');
 const DEFAULT_FFDEC = 'C:\\Program Files (x86)\\FFDec\\ffdec-cli.exe';
 const PATCH_MARKER_NAME = 'LOST_AT_SEA_SERVER_SCENE_MARKER';
-const PATCH_MARKER_VALUE = 'LostAtSeaServerSceneV3';
-const LEGACY_PATCH_MARKER_VALUES = ['LostAtSeaServerSceneV1', 'LostAtSeaServerSceneV2'];
+const PATCH_MARKER_VALUE = 'LostAtSeaServerSceneV4';
+const LEGACY_PATCH_MARKER_VALUES = ['LostAtSeaServerSceneV1', 'LostAtSeaServerSceneV2', 'LostAtSeaServerSceneV3'];
 const WORK_DIR_NAME = 'ffdec-levelstut-lost-at-sea-server-scene';
 
 const FIELD_ANCHOR = '      public var bWaveFourActive:Boolean;';
@@ -32,6 +32,7 @@ const PATCH_FIELD_NAMES = [
   'serverScenePhase0MoveVisible',
   'serverScenePhase1Spawned',
   'serverScenePhase1RangedVisible',
+  'serverScenePhase1CompletionSent',
   'serverScenePhase4BeAlertStarted',
   'serverScenePhase4MeleeVisible',
   'serverScenePhase8BossCutsceneStarted',
@@ -120,7 +121,9 @@ const FIELD_BLOCK = `${FIELD_ANCHOR}
       public var serverScenePhase1Spawned:Boolean;
       
       public var serverScenePhase1RangedVisible:Boolean;
-      
+
+      public var serverScenePhase1CompletionSent:Boolean;
+
       public var serverScenePhase4BeAlertStarted:Boolean;
       
       public var serverScenePhase4MeleeVisible:Boolean;
@@ -144,6 +147,7 @@ const SERVER_SCENE_METHODS = `      public function InitRoom(param1:a_GameHook) 
          this.serverScenePhase0MoveVisible = false;
          this.serverScenePhase1Spawned = false;
          this.serverScenePhase1RangedVisible = false;
+         this.serverScenePhase1CompletionSent = false;
          this.serverScenePhase4BeAlertStarted = false;
          this.serverScenePhase4MeleeVisible = false;
          this.serverScenePhase8BossCutsceneStarted = false;
@@ -216,6 +220,13 @@ ${SERVER_TRIGGER_HANDLERS}
             {
                param1.ShowTutorial("am_HighlighterRanged");
                this.serverScenePhase1RangedVisible = true;
+            }
+            if(!this.serverScenePhase1CompletionSent && this.serverScenePhase1Spawned && this.am_Phage1.Defeated())
+            {
+               param1.HideTutorial("am_HighlighterRanged");
+               param1.CollisionOn("LostAtSeaRangedTutorialComplete");
+               this.serverScenePhase1RangedVisible = false;
+               this.serverScenePhase1CompletionSent = true;
             }
          }
          if(this.serverScenePhase == 4)
@@ -423,6 +434,7 @@ ${SERVER_TRIGGER_HANDLERS}
          this.serverScenePhase0MoveVisible = false;
          this.serverScenePhase1Spawned = false;
          this.serverScenePhase1RangedVisible = false;
+         this.serverScenePhase1CompletionSent = false;
          this.serverScenePhase4BeAlertStarted = false;
          this.serverScenePhase4MeleeVisible = false;
          this.serverScenePhase8BossCutsceneStarted = false;
@@ -725,6 +737,7 @@ function verifySource(source) {
     'param1.cutSceneStartBoss = null;',
     'this.ApplyServerScenePhase(param1,this.serverScenePhase,this.serverSceneElapsedSecond);',
     'this.TickServerScenePhase(param1);',
+    'param1.CollisionOn("LostAtSeaRangedTutorialComplete");',
     'this.am_Phage1.Spawn();',
     'this.am_Phage3.Spawn();',
     'this.am_Phage4.Spawn();',
@@ -760,7 +773,7 @@ function verifySource(source) {
   }
   for (const legacyMarker of LEGACY_PATCH_MARKER_VALUES) {
     if (source.includes(legacyMarker)) {
-      throw new Error(`Legacy Lost at Sea marker remains after the V3 upgrade: ${legacyMarker}`);
+      throw new Error(`Legacy Lost at Sea marker remains after the V4 upgrade: ${legacyMarker}`);
     }
   }
   if (source.includes('param1.initialPhase = this.FirstTickRoom;')) {
@@ -842,7 +855,7 @@ function main() {
 
   if (args.verify) {
     verifySource(originalSource);
-    console.log('[LostAtSeaServerScene] verified V3 elapsed/mask monotonic server scene consumer');
+    console.log('[LostAtSeaServerScene] verified V4 elapsed/mask monotonic server scene consumer');
     return;
   }
 
@@ -865,7 +878,7 @@ function main() {
   const finalVerifyWork = `${work}-final-verify`;
   const finalSource = exportRoom(ffdec, root, finalVerifyWork, swf);
   verifySource(fs.readFileSync(finalSource, 'utf8'));
-  console.log('[LostAtSeaServerScene] rebuilt LevelsTut.swf and round-trip verified the V3 elapsed/mask server scene consumer');
+  console.log('[LostAtSeaServerScene] rebuilt LevelsTut.swf and round-trip verified the V4 elapsed/mask server scene consumer');
 }
 
 main();

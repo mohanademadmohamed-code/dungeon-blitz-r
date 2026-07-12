@@ -84,6 +84,8 @@ const EXPECTED_PHASE_COUNTS = new Map<number, number>([
 const EXPECTED_AUTHORITY_HP_SCALE_BY_SOURCE_VAR = new Map<string, number>([
     ['am_Phage1', 0.035],
     ['am_Phage3', 0.035],
+    ['am_Phage4', 0.035],
+    ['am_Phage6', 0.035],
     ['am_Boss', 3]
 ]);
 const DEFAULT_LOST_AT_SEA_MINION_HP_SCALE = 0.4;
@@ -387,12 +389,18 @@ function testPersistentOneWayScene(): void {
     );
     assert.equal(canonicalHostiles.length, 12, 'all twelve Lost At Sea combat actors must be canonical server entities');
     const tutorialClearHostiles = canonicalHostiles.filter((entity) =>
-        entity.sourceVar === 'am_Phage1' || entity.sourceVar === 'am_Phage3'
+        entity.sourceVar === 'am_Phage1' ||
+        entity.sourceVar === 'am_Phage3' ||
+        entity.sourceVar === 'am_Phage4' ||
+        entity.sourceVar === 'am_Phage6'
     );
     const wolfEndScaledHostiles = canonicalHostiles.filter((entity) =>
-        entity.sourceVar !== 'am_Phage1' && entity.sourceVar !== 'am_Phage3'
+        entity.sourceVar !== 'am_Phage1' &&
+        entity.sourceVar !== 'am_Phage3' &&
+        entity.sourceVar !== 'am_Phage4' &&
+        entity.sourceVar !== 'am_Phage6'
     );
-    assert.equal(tutorialClearHostiles.length, 2, 'the two ranged tutorial clear targets must be explicitly classified');
+    assert.equal(tutorialClearHostiles.length, 4, 'the four early tutorial clear targets must be explicitly classified');
     assert.equal(
         tutorialClearHostiles.every((entity) =>
             Number(entity.level) === 50 &&
@@ -401,7 +409,7 @@ function testPersistentOneWayScene(): void {
             Number(entity.maxHp) <= 5_000
         ),
         true,
-        'the ranged tutorial clear targets must be killable by tutorial-scale ranged damage'
+        'the early tutorial clear targets must be killable by tutorial-scale damage'
     );
     assert.equal(
         wolfEndScaledHostiles.every((entity) =>
@@ -789,6 +797,105 @@ async function testRangedTutorialDamageAdvancesScene(): Promise<void> {
     assertOnlyPhaseTargetable(GlobalState.levelEntities.get(scope)!, LostAtSeaScenePhase.SecondFlier);
 }
 
+async function testPsychophageTutorialDamageAdvancesScene(): Promise<void> {
+    const client = createFakeClient('LostSeaPsychophageClear', 61_072, LEVEL_NAME, 'lost-at-sea-psychophage-clear');
+    attachPlayer(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+    EntityHandler.sendInitialLevelEntities(client as never, LEVEL_NAME);
+
+    const scope = getLevelScopeKey(LEVEL_NAME, client.levelInstanceId);
+    const state = LostAtSeaScene.ensureForClient(client as never, 4_250_000);
+    assert.ok(state, 'psychophage tutorial regression must create a Lost At Sea scene');
+    let now = state.phaseStartedAt + LOST_AT_SEA_SCENE_DURATIONS_MS.intro;
+    LostAtSeaScene.advanceScope(scope, now);
+    assert.equal(state.phase, LostAtSeaScenePhase.FirstFlier);
+
+    addPhaseTombstones(scope, state, LostAtSeaScenePhase.FirstFlier, now + 100);
+    LostAtSeaScene.advanceScope(scope, now + 100);
+    assert.equal(state.phase, LostAtSeaScenePhase.SecondFlier);
+
+    addPhaseTombstones(scope, state, LostAtSeaScenePhase.SecondFlier, now + 200);
+    LostAtSeaScene.advanceScope(scope, now + 200);
+    assert.equal(state.phase, LostAtSeaScenePhase.Psychophages);
+    assertOnlyPhaseTargetable(GlobalState.levelEntities.get(scope)!, LostAtSeaScenePhase.Psychophages);
+
+    const psychophageIds = state.phaseEntityIds[String(LostAtSeaScenePhase.Psychophages)] ?? [];
+    assert.equal(psychophageIds.length, 2, 'psychophage tutorial phase must have two canonical targets');
+    for (const canonicalId of psychophageIds) {
+        const entity = GlobalState.levelEntities.get(scope)?.get(canonicalId);
+        assert.ok(entity, `psychophage tutorial target ${canonicalId} must exist`);
+        assert.ok(
+            Number(entity.maxHp) <= 5_000,
+            `psychophage tutorial target must not keep full Wolf's End HP; maxHp=${Number(entity.maxHp)}`
+        );
+        await CombatHandler.handlePowerHit(client as never, buildPowerHitPayload(canonicalId, client.clientEntID, 5_000));
+    }
+
+    now += 300;
+    LostAtSeaScene.advanceScope(scope, now);
+    assert.equal(
+        state.phase,
+        LostAtSeaScenePhase.GoblinIntermission,
+        'killing both psychophage tutorial targets must advance to the health-bar/goblin intermission tutorial'
+    );
+    assertOnlyPhaseTargetable(GlobalState.levelEntities.get(scope)!, LostAtSeaScenePhase.GoblinIntermission);
+}
+
+function testRangedTutorialCompletionSignalAdvancesScene(): void {
+    const client = createFakeClient('LostSeaRangedSignal', 61_071, LEVEL_NAME, 'lost-at-sea-ranged-signal');
+    attachPlayer(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+    EntityHandler.sendInitialLevelEntities(client as never, LEVEL_NAME);
+
+    const scope = getLevelScopeKey(LEVEL_NAME, client.levelInstanceId);
+    const state = LostAtSeaScene.ensureForClient(client as never, 4_500_000);
+    assert.ok(state, 'ranged tutorial signal regression must create a Lost At Sea scene');
+    LostAtSeaScene.advanceScope(scope, state.phaseStartedAt + LOST_AT_SEA_SCENE_DURATIONS_MS.intro);
+    assert.equal(state.phase, LostAtSeaScenePhase.FirstFlier);
+
+    const firstFlierId = state.phaseEntityIds[String(LostAtSeaScenePhase.FirstFlier)]?.[0] ?? 0;
+    assert.ok(firstFlierId > 0, 'first ranged tutorial signal target must be tracked by the scene');
+    assert.ok(GlobalState.levelEntities.get(scope)?.has(firstFlierId), 'first flier must exist before the completion signal');
+
+    client.sentPackets.length = 0;
+    assert.equal(
+        LostAtSeaScene.handleLevelStateSyncRequest(
+            client as never,
+            `${ROOM_STATE_ID}^SetDynamicCollision^LostAtSeaRangedTutorialComplete`,
+            'On'
+        ),
+        true,
+        'ranged tutorial completion collision must be consumed by Lost At Sea authority'
+    );
+
+    assert.equal(
+        state.phase,
+        LostAtSeaScenePhase.SecondFlier,
+        'ranged tutorial completion signal must advance the shared server scene'
+    );
+    assert.equal(
+        GlobalState.deadServerAuthorityHostilesByScope.get(scope)?.get(
+            'levelsTut|lost_at_sea|room:0|index:0|type:IntroDummyFlier|pos:7111:162'
+        )?.canonicalId,
+        firstFlierId,
+        'ranged tutorial completion signal must tombstone the first flier'
+    );
+    assert.equal(
+        GlobalState.levelEntities.get(scope)?.has(firstFlierId),
+        false,
+        'tombstoned ranged tutorial flier must not remain live for late joiners'
+    );
+    assert.deepEqual(
+        readSceneTriggers(client).slice(-3),
+        [
+            `${ROOM_STATE_ID}^Trigger^LostAtSeaElapsedSecond0`,
+            `${ROOM_STATE_ID}^Trigger^LostAtSeaAliveMask1`,
+            `${ROOM_STATE_ID}^Trigger^LostAtSeaPhase2`
+        ],
+        'completion signal response must send the next phase snapshot back to the client'
+    );
+}
+
 async function testHostilePlayerDamageDoesNotDoubleApply(): Promise<void> {
     const client = createFakeClient('LostSeaDamageTarget', 61_050, LEVEL_NAME, 'lost-at-sea-damage-instance');
     attachPlayer(client);
@@ -858,6 +965,8 @@ async function main(): Promise<void> {
         testEmptyInProgressScopeSurvivesOwnerCleanup();
         await testHostilePlayerDamageDoesNotDoubleApply();
         await testRangedTutorialDamageAdvancesScene();
+        await testPsychophageTutorialDamageAdvancesScene();
+        testRangedTutorialCompletionSignalAdvancesScene();
         testPersistentOneWayScene();
 
         console.log('lost_at_sea_server_authority_regression: ok');
