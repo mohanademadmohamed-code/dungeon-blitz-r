@@ -54,7 +54,7 @@ import {
     getScopeLevelName,
     normalizeLevelInstanceId
 } from '../core/LevelScope';
-import { markRoomBossEntity } from '../core/RoomBossState';
+import { getRoomBossAwareRoomId, markRoomBossEntity } from '../core/RoomBossState';
 import { getCharacterRuntimeLevel, getPartyRuntimeLevelForClient } from '../core/RuntimeLevel';
 import { getCraftTownHomeInstanceId } from '../utils/HomeVisitGuard';
 import {
@@ -1595,10 +1595,11 @@ export class LevelHandler {
             if (!EntityHandler.isServerAuthorityHostileEntity(levelName, entity)) {
                 continue;
             }
+            const entityRoomId = getRoomBossAwareRoomId(entity);
             if (
                 normalizedRoomId > 0 &&
-                Number.isFinite(Number(entity?.roomId)) &&
-                !sharesRoomIds(normalizedRoomId, Math.round(Number(entity.roomId)))
+                entityRoomId >= 0 &&
+                !sharesRoomIds(normalizedRoomId, entityRoomId)
             ) {
                 continue;
             }

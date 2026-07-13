@@ -9,7 +9,9 @@ import { DungeonSpawnLoader } from '../data/DungeonSpawnLoader';
 import { NpcLoader } from '../data/NpcLoader';
 import { CombatHandler } from '../handlers/CombatHandler';
 import { EntityHandler } from '../handlers/EntityHandler';
+import { LevelHandler } from '../handlers/LevelHandler';
 import { BitBuffer } from '../network/protocol/bitBuffer';
+import { BitReader } from '../network/protocol/bitReader';
 import { getLevelScopeKey } from '../core/LevelScope';
 
 type FakeClient = {
@@ -165,6 +167,30 @@ function buildPowerHitPayload(targetId: number, sourceId: number, damage: number
     return bb.toBuffer();
 }
 
+function buildRoomBossInfoPayload(roomId: number, bossId: number, bossName: string): Buffer {
+    const bb = new BitBuffer(false);
+    bb.writeMethod9(roomId);
+    bb.writeMethod9(bossId);
+    bb.writeMethod26(bossName);
+    bb.writeMethod9(0);
+    bb.writeMethod26('');
+    return bb.toBuffer();
+}
+
+function buildRoomClosePayload(roomId: number): Buffer {
+    const bb = new BitBuffer(false);
+    bb.writeMethod9(roomId);
+    return bb.toBuffer();
+}
+
+function parseUntargetablePayload(payload: Buffer): { entityId: number; untargetable: boolean } {
+    const br = new BitReader(payload);
+    return {
+        entityId: br.readMethod4(),
+        untargetable: br.readMethod15()
+    };
+}
+
 function testGlobalBossRegistry(): void {
     const loadedLevels = DungeonSpawnLoader.getLoadedLevelNames();
     const globalBossLevels = loadedLevels.filter((levelName) => levelName !== 'JC_Mini2');
@@ -260,6 +286,60 @@ async function testWolfsEndBossProxyAndRegularHostile(levelName: 'TutorialDungeo
     assert.equal(boss.dead, true, `${levelName} lethal player damage must mark canonical boss dead`);
     assert.equal(boss.destroyed, true, `${levelName} lethal player damage must finalize canonical boss destruction`);
     assert.equal(Math.max(0, Number(boss.deathVersion ?? 0)), 1, `${levelName} canonical boss death must commit once`);
+}
+
+async function testTutorialBoatLiveBossRoomCombat(): Promise<void> {
+    const liveBossRoomId = 2333678904;
+    const client = createFakeClient('TutorialBoat', 'tutorial-boat-live-boss-room', 56006);
+    client.currentRoomId = liveBossRoomId;
+    client.character.CurrentLevel = { name: 'TutorialBoat', x: 6670, y: 620 };
+    attachPlayer(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+    EntityHandler.sendInitialLevelEntities(client as never, 'TutorialBoat');
+
+    const scope = getLevelScopeKey('TutorialBoat', client.levelInstanceId);
+    const levelMap = GlobalState.levelEntities.get(scope);
+    const boss = Array.from(levelMap?.values() ?? []).find((entity) =>
+        EntityHandler.isServerAuthorityHostileEntity('TutorialBoat', entity) &&
+        String(entity?.name ?? '') === 'IntroKraken'
+    );
+    assert.ok(boss, 'TutorialBoat must seed the canonical IntroKraken');
+
+    const localBossId = 7690967;
+    EntityHandler.handleEntityFullUpdate(
+        client as never,
+        buildHostileFullUpdate(localBossId, 'IntroKraken', Number(boss.x), Number(boss.y), liveBossRoomId)
+    );
+    assert.equal(EntityHandler.resolveEntityAlias(client as never, localBossId), boss.id, 'live Kraken cue must alias to canonical IntroKraken');
+
+    (client as any).activeDungeonCutsceneScope = scope;
+    (client as any).activeDungeonCutsceneRoomId = liveBossRoomId;
+    (client as any).lastDungeonCutsceneStartAt = Date.now();
+    LevelHandler.handleRoomBossInfo(
+        client as never,
+        buildRoomBossInfoPayload(liveBossRoomId, localBossId, 'Colossal War Kraken')
+    );
+    assert.equal(Number(boss.roomBossRoomId), liveBossRoomId, 'boss-info must preserve the live Flash arena id');
+    assert.equal(Boolean(boss.untargetable), true, 'Kraken must remain frozen during its intro');
+
+    LevelHandler.handleRoomClose(client as never, buildRoomClosePayload(liveBossRoomId));
+    assert.equal(Boolean(boss.untargetable), false, 'room close must unfreeze canonical Kraken using the live arena id');
+    assert.equal(Boolean(client.entities.get(localBossId)?.untargetable), false, 'room close must unfreeze the local Kraken proxy');
+    assert.ok(
+        client.sentPackets
+            .filter((packet) => packet.id === 0xAE)
+            .map((packet) => parseUntargetablePayload(packet.payload))
+            .some((packet) => packet.entityId === localBossId && packet.untargetable === false),
+        'room close must send untargetable=false to the local Kraken proxy'
+    );
+
+    const bossHpBefore = Math.max(1, Math.round(Number(boss.hp ?? boss.maxHp ?? 1)));
+    await CombatHandler.handlePowerHit(client as never, buildPowerHitPayload(localBossId, client.clientEntID, 100));
+    assert.equal(Number(boss.hp), bossHpBefore - 100, 'player damage must reduce canonical Kraken HP');
+
+    const playerHpBefore = client.authoritativeCurrentHp;
+    await CombatHandler.handlePowerHit(client as never, buildPowerHitPayload(client.clientEntID, localBossId, 25));
+    assert.equal(client.authoritativeCurrentHp, playerHpBefore - 25, 'Kraken damage must reduce authoritative player HP');
 }
 
 async function testGoblinKidnappersConcurrentCanonicalDamage(): Promise<void> {
@@ -365,6 +445,10 @@ async function main(): Promise<void> {
         GlobalState.levelEntities.clear();
         GlobalState.sessionsByToken.clear();
         await testWolfsEndBossProxyAndRegularHostile('TutorialDungeonHard');
+
+        GlobalState.levelEntities.clear();
+        GlobalState.sessionsByToken.clear();
+        await testTutorialBoatLiveBossRoomCombat();
 
         GlobalState.levelEntities.clear();
         GlobalState.sessionsByToken.clear();

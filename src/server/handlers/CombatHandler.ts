@@ -26,7 +26,7 @@ import { CharacterSync } from '../utils/CharacterSync';
 import { sendConsumableUpdate } from '../utils/ConsumableState';
 import { LevelConfig } from '../core/LevelConfig';
 import { DungeonSession } from '../core/DungeonSession';
-import { isRoomBossEntity } from '../core/RoomBossState';
+import { getRoomBossAwareRoomId, isRoomBossEntity } from '../core/RoomBossState';
 import { logJcMini1Authority } from '../utils/JcMini1AuthorityLog';
 import { RewardHandler } from './RewardHandler';
 import {
@@ -1081,7 +1081,7 @@ export class CombatHandler {
     }
 
     private static hasLivingPlayerInHostileRoom(levelScope: string, entity: any): boolean {
-        const sourceRoomId = Number.isFinite(Number(entity?.roomId)) ? Math.round(Number(entity.roomId)) : -1;
+        const sourceRoomId = getRoomBossAwareRoomId(entity);
         for (const session of GlobalState.sessionsByToken.values()) {
             if (!session.playerSpawned || getClientLevelScope(session) !== levelScope) {
                 continue;
@@ -3151,13 +3151,7 @@ export class CombatHandler {
             return false;
         }
 
-        const sourceRoomId = Number.isFinite(Number(sourceEntity?.roomId))
-            ? Math.round(Number(sourceEntity.roomId))
-            : (
-                Number.isFinite(Number(client.currentRoomId))
-                    ? Math.round(Number(client.currentRoomId))
-                    : -1
-            );
+        const sourceRoomId = getRoomBossAwareRoomId(sourceEntity, client.currentRoomId);
         const locked = LevelHandler.isDungeonCutsceneCombatLockedForScope(levelScope, sourceRoomId);
         if (!locked) {
             return false;
@@ -5294,7 +5288,7 @@ export class CombatHandler {
             return;
         }
 
-        const sourceRoomId = Number.isFinite(Number(sourceEntity?.roomId)) ? Number(sourceEntity.roomId) : -1;
+        const sourceRoomId = getRoomBossAwareRoomId(sourceEntity);
         const partySharedSource = CombatHandler.shouldMirrorClientSpawnEntityToParty(getScopeLevelName(levelScope), sourceEntity);
         const dedupedRefs = Array.from(new Set(referencedEntityIds.filter((id) => Number.isFinite(id) && id > 0)));
 
@@ -5497,7 +5491,7 @@ export class CombatHandler {
             return false;
         }
 
-        const bossRoomId = Number.isFinite(Number(entity?.roomId)) ? Math.round(Number(entity.roomId)) : -1;
+        const bossRoomId = getRoomBossAwareRoomId(entity);
         const playerRoomId = Number.isFinite(Number(session.currentRoomId)) ? Math.round(Number(session.currentRoomId)) : -1;
         if (bossRoomId < 0 || playerRoomId < 0 || bossRoomId !== playerRoomId) {
             return false;
