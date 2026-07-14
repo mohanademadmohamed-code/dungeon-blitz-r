@@ -12,6 +12,7 @@ export type DungeonCompletionCutsceneCondition = {
 
 export type DungeonCompletionCondition = {
     mode: DungeonCompletionMode;
+    partyHostileSync?: 'all' | 'bosses-only';
     bossGroups?: string[][];
     bossAliases?: Record<string, string>;
     entityObjectives?: DungeonCompletionEntityObjective[];

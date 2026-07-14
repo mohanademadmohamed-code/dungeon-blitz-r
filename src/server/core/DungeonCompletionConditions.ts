@@ -13,6 +13,7 @@ type RawCatalog = {
 
 const catalog = rawConditions as RawCatalog;
 const VALID_MODES = new Set<DungeonCompletionMode>(['bosses', 'full-clear', 'client-signal', 'disabled']);
+const VALID_PARTY_HOSTILE_SYNC_POLICIES = new Set(['all', 'bosses-only']);
 
 function normalizeIdentity(value: unknown): string {
     return String(value ?? '')
@@ -79,6 +80,14 @@ export class DungeonCompletionConditions {
 
     static requiresBosses(levelName: string | null | undefined): boolean {
         return DungeonCompletionConditions.get(levelName)?.mode === 'bosses';
+    }
+
+    static sharesClientHostileWithParty(levelName: string | null | undefined, entity: any): boolean {
+        const condition = DungeonCompletionConditions.get(levelName);
+        if (!condition || condition.partyHostileSync !== 'bosses-only') {
+            return true;
+        }
+        return DungeonCompletionConditions.isRequiredBoss(levelName, entity);
     }
 
     static hasPostObjectiveCutscene(levelName: string | null | undefined): boolean {
@@ -175,6 +184,15 @@ export class DungeonCompletionConditions {
             if (!condition || !VALID_MODES.has(condition.mode)) {
                 errors.push(`${levelName}: invalid mode`);
                 continue;
+            }
+            if (
+                condition.partyHostileSync &&
+                !VALID_PARTY_HOSTILE_SYNC_POLICIES.has(condition.partyHostileSync)
+            ) {
+                errors.push(`${levelName}: invalid party hostile sync policy`);
+            }
+            if (condition.partyHostileSync === 'bosses-only' && condition.mode !== 'bosses') {
+                errors.push(`${levelName}: bosses-only party hostile sync requires boss mode`);
             }
             if (condition.mode === 'bosses') {
                 if (!condition.bossGroups?.length || condition.bossGroups.some((group) => !group.length)) {

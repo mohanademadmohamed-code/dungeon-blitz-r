@@ -169,7 +169,7 @@
     "SwampRoadConnectionMission": {"mode":"full-clear"},
     "SwampRoadConnectionMissionHard": {"mode":"full-clear"},
     "TutorialBoat": {"mode":"client-signal"},
-    "TutorialDungeon": {"mode":"bosses","bossGroups":[["GoblinBoss1"]],"bossAliases":{"Tag Ugo":"GoblinBoss1","TagUgo":"GoblinBoss1"},"entityObjectives":[{"names":["Chains03"],"aliases":["AnnaChain"],"role":"anna-rescue"}],"cutscene":{"requiredAfterObjectives":true}},
-    "TutorialDungeonHard": {"mode":"bosses","bossGroups":[["GoblinBoss1Hard"]]}
+    "TutorialDungeon": {"mode":"bosses","partyHostileSync":"bosses-only","bossGroups":[["GoblinBoss1"]],"bossAliases":{"Tag Ugo":"GoblinBoss1","TagUgo":"GoblinBoss1"},"entityObjectives":[{"names":["Chains03"],"aliases":["AnnaChain"],"role":"anna-rescue"}],"cutscene":{"requiredAfterObjectives":true}},
+    "TutorialDungeonHard": {"mode":"bosses","partyHostileSync":"bosses-only","bossGroups":[["GoblinBoss1Hard"]],"bossAliases":{"GoblinBoss1":"GoblinBoss1Hard","Tag Ugo":"GoblinBoss1Hard","TagUgo":"GoblinBoss1Hard"}}
   }
 }
