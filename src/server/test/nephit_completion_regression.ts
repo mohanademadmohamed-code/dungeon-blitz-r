@@ -30,20 +30,14 @@ type FakeClient = {
     pendingDungeonCompletionNotBeforeAt: number;
     pendingDungeonCompletionSettleMs: number;
     pendingDungeonCompletionPayload: Buffer | null;
-    pendingDungeonCompletionForceSharedScope: string;
     pendingDungeonCompletionTimer: NodeJS.Timeout | null;
     pendingDungeonCompletionFlushActive: boolean;
-    pendingDungeonCompletionWaitForCutsceneEnd: boolean;
     activeDungeonCutsceneScope: string;
     activeDungeonCutsceneRoomId: number;
     lastDungeonCutsceneStartScope: string;
     lastDungeonCutsceneStartAt: number;
     lastDungeonCutsceneEndScope: string;
     lastDungeonCutsceneEndAt: number;
-    forcedDungeonCompletionScope: string;
-    finalizingDungeonCompletionScope: string;
-    completedDungeonCompletionScope: string;
-    completedDungeonCompletionSentAt: number;
     armPendingTransferGrace(): void;
     send(id: number, payload: Buffer): void;
     sendBitBuffer(id: number, bb: BitBuffer): void;
@@ -100,20 +94,14 @@ function createFakeClient(name: string, token: number, questTrackerState: number
         pendingDungeonCompletionNotBeforeAt: 0,
         pendingDungeonCompletionSettleMs: 0,
         pendingDungeonCompletionPayload: null,
-        pendingDungeonCompletionForceSharedScope: '',
         pendingDungeonCompletionTimer: null,
         pendingDungeonCompletionFlushActive: false,
-        pendingDungeonCompletionWaitForCutsceneEnd: false,
         activeDungeonCutsceneScope: '',
         activeDungeonCutsceneRoomId: 0,
         lastDungeonCutsceneStartScope: '',
         lastDungeonCutsceneStartAt: 0,
         lastDungeonCutsceneEndScope: '',
         lastDungeonCutsceneEndAt: 0,
-        forcedDungeonCompletionScope: '',
-        finalizingDungeonCompletionScope: '',
-        completedDungeonCompletionScope: '',
-        completedDungeonCompletionSentAt: 0,
         armPendingTransferGrace() {
             return undefined;
         },
@@ -197,6 +185,7 @@ function createImperialChampionBoss(): any {
 
 function seedNephitRun(client: FakeClient, boss: any): void {
     const scope = getClientLevelScope(client as never);
+    GlobalState.sessionsByToken.set(client.token, client as never);
     client.entities.set(boss.id, boss);
     GlobalState.levelEntities.set(scope, new Map([
         [boss.id, boss],
@@ -220,12 +209,14 @@ function seedNephitRun(client: FakeClient, boss: any): void {
 
 function seedSingleBossRun(client: FakeClient, boss: any): void {
     const scope = getClientLevelScope(client as never);
+    GlobalState.sessionsByToken.set(client.token, client as never);
     client.entities.set(boss.id, boss);
     GlobalState.levelEntities.set(scope, new Map([[boss.id, boss]]));
 }
 
 function seedNephitRunWithClientOnlyBossProxy(client: FakeClient, boss: any): void {
     const scope = getClientLevelScope(client as never);
+    GlobalState.sessionsByToken.set(client.token, client as never);
     client.entities.set(boss.id, boss);
     GlobalState.levelEntities.set(scope, new Map([
         [
@@ -250,6 +241,19 @@ function rankPacketCount(client: FakeClient): number {
     return client.sentPackets.filter((packet) => packet.id === 0x87).length;
 }
 
+function buildLevelCompletePacket(completionPercent: number = 100): Buffer {
+    const bb = new BitBuffer(false);
+    bb.writeMethod9(completionPercent);
+    bb.writeMethod9(0); // bonus score
+    bb.writeMethod9(0); // gold reward
+    bb.writeMethod9(0); // material reward
+    bb.writeMethod9(0); // gear count
+    bb.writeMethod9(0); // remaining kills
+    bb.writeMethod9(1); // required kills
+    bb.writeMethod9(0); // level width score
+    return bb.toBuffer();
+}
+
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -267,9 +271,15 @@ async function testNephitAliasCompletesAfterPostBossSkitQuiet(): Promise<void> {
 
     await MissionHandler.handleForcedDungeonBossCompletion(client as never, boss);
 
-    assert.equal(client.pendingDungeonCompletionScope, getClientLevelScope(client as never));
-    assert.equal(client.pendingDungeonCompletionWaitForCutsceneEnd, true);
+    assert.equal(client.pendingDungeonCompletionScope, '', 'completion must not queue before the shared cutscene gate');
     assert.equal(rankPacketCount(client), 0, 'rank screen must not appear before post-boss skit settles');
+
+    await MissionHandler.handleSetLevelComplete(client as never, buildLevelCompletePacket());
+    assert.equal(
+        rankPacketCount(client),
+        0,
+        'a client completion packet must not bypass Nephit\'s authoritative cutscene-end gate'
+    );
 
     MissionHandler.noteDungeonCutsceneStart(client as never, 12);
     MissionHandler.noteDungeonSkitActivity(client as never);
@@ -320,6 +330,7 @@ async function testPostCutsceneCompletesWhenDefeatedBossProxyOnlyExistsClientSid
     const boss = createNephitBoss('Nephit');
     seedNephitRunWithClientOnlyBossProxy(client, boss);
 
+    await MissionHandler.handleForcedDungeonBossCompletion(client as never, boss);
     MissionHandler.noteDungeonCutsceneStart(client as never, 12);
     MissionHandler.noteDungeonCutsceneEnd(client as never, 12);
     await waitForPendingSettle();
@@ -338,7 +349,8 @@ async function testNonNephitBossDungeonStillOpensRankScreen(): Promise<void> {
     seedSingleBossRun(client, boss);
 
     await MissionHandler.handleForcedDungeonBossCompletion(client as never, boss);
-    MissionHandler.noteDungeonSkitActivity(client as never);
+    MissionHandler.noteDungeonCutsceneStart(client as never, 12);
+    MissionHandler.noteDungeonCutsceneEnd(client as never, 12);
     await waitForPendingSettle();
 
     assert.equal(rankPacketCount(client), 1, 'non-Nephit boss dungeon should still send the rank/statistics packet');
@@ -365,6 +377,7 @@ async function main(): Promise<void> {
     const levelEntities = new Map(GlobalState.levelEntities);
     const levelQuestProgress = new Map(GlobalState.levelQuestProgress);
     const sessionsByToken = new Map(GlobalState.sessionsByToken);
+    const dungeonCompletions = new Map(GlobalState.dungeonCompletions);
 
     try {
         (MissionHandler as any).DUNGEON_COMPLETION_SKIT_SETTLE_MS = TEST_SETTLE_MS;
@@ -372,31 +385,37 @@ async function main(): Promise<void> {
         GlobalState.levelEntities.clear();
         GlobalState.levelQuestProgress.clear();
         GlobalState.sessionsByToken.clear();
+        GlobalState.dungeonCompletions.clear();
         await testNephitAliasCompletesAfterPostBossSkitQuiet();
 
         GlobalState.levelEntities.clear();
         GlobalState.levelQuestProgress.clear();
         GlobalState.sessionsByToken.clear();
+        GlobalState.dungeonCompletions.clear();
         await testQuestTrackerTwentySixStillCompletesAfterBossSkit();
 
         GlobalState.levelEntities.clear();
         GlobalState.levelQuestProgress.clear();
         GlobalState.sessionsByToken.clear();
+        GlobalState.dungeonCompletions.clear();
         await testPostCutsceneCompletesWhenDefeatedBossProxyOnlyExistsClientSide();
 
         GlobalState.levelEntities.clear();
         GlobalState.levelQuestProgress.clear();
         GlobalState.sessionsByToken.clear();
+        GlobalState.dungeonCompletions.clear();
         await testNonNephitBossDungeonStillOpensRankScreen();
 
         GlobalState.levelEntities.clear();
         GlobalState.levelQuestProgress.clear();
         GlobalState.sessionsByToken.clear();
+        GlobalState.dungeonCompletions.clear();
         await testEarlyCutsceneDoesNotCompleteBeforeBossDeath();
     } finally {
         (MissionHandler as any).DUNGEON_COMPLETION_SKIT_SETTLE_MS = originalSettleMs;
         GlobalState.levelEntities = levelEntities;
         GlobalState.levelQuestProgress = levelQuestProgress;
+        GlobalState.dungeonCompletions = dungeonCompletions;
         GlobalState.sessionsByToken.clear();
         for (const [token, session] of sessionsByToken) {
             GlobalState.sessionsByToken.set(token, session);

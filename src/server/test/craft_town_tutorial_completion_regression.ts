@@ -26,16 +26,10 @@ type FakeClient = {
     pendingDungeonCompletionNotBeforeAt: number;
     pendingDungeonCompletionSettleMs: number;
     pendingDungeonCompletionPayload: Buffer | null;
-    pendingDungeonCompletionForceSharedScope: string;
     pendingDungeonCompletionTimer: NodeJS.Timeout | null;
     pendingDungeonCompletionFlushActive: boolean;
-    pendingDungeonCompletionWaitForCutsceneEnd: boolean;
     activeDungeonCutsceneScope: string;
     activeDungeonCutsceneRoomId: number;
-    forcedDungeonCompletionScope: string;
-    finalizingDungeonCompletionScope: string;
-    completedDungeonCompletionScope: string;
-    completedDungeonCompletionSentAt: number;
     lastDoorId: number;
     lastDoorTargetLevel: string;
     armPendingTransferGrace(): void;
@@ -98,16 +92,10 @@ function createFakeClient(name: string, token: number): FakeClient {
         pendingDungeonCompletionNotBeforeAt: 0,
         pendingDungeonCompletionSettleMs: 0,
         pendingDungeonCompletionPayload: null,
-        pendingDungeonCompletionForceSharedScope: '',
         pendingDungeonCompletionTimer: null,
         pendingDungeonCompletionFlushActive: false,
-        pendingDungeonCompletionWaitForCutsceneEnd: false,
         activeDungeonCutsceneScope: '',
         activeDungeonCutsceneRoomId: 0,
-        forcedDungeonCompletionScope: '',
-        finalizingDungeonCompletionScope: '',
-        completedDungeonCompletionScope: '',
-        completedDungeonCompletionSentAt: 0,
         lastDoorId: 0,
         lastDoorTargetLevel: '',
         armPendingTransferGrace() {
@@ -168,12 +156,12 @@ function sleep(ms: number): Promise<void> {
 async function testKeepBossDeathCompletesQuestAfterCutsceneDespiteAliveHelpers(): Promise<void> {
     const client = createFakeClient('KeepRunner', 7001);
     seedKeepStateWithAliveHelper();
+    GlobalState.sessionsByToken.set(client.token, client as never);
 
     await MissionHandler.handleForcedDungeonBossCompletion(client as never, bossDeathReport());
 
     assert.equal(client.keepTutorialState.bossDefeated, true, 'server should record Ranik as defeated');
-    assert.equal(client.pendingDungeonCompletionScope, 'CraftTownTutorial#keep-run');
-    assert.equal(client.pendingDungeonCompletionWaitForCutsceneEnd, true);
+    assert.equal(client.pendingDungeonCompletionScope, '', 'completion must not queue before the shared cutscene gate');
     assert.equal(client.sentPackets.some((packet) => packet.id === 0x87), false);
 
     MissionHandler.noteDungeonCutsceneStart(client as never, 7);
@@ -201,7 +189,7 @@ async function testKeepBossDeathPropagatesCompletionToParty(): Promise<void> {
     await MissionHandler.handleForcedDungeonBossCompletion(host as never, bossDeathReport());
     MissionHandler.noteDungeonCutsceneStart(host as never, 7);
     MissionHandler.noteDungeonCutsceneEnd(host as never, 7);
-    await sleep(0);
+    await sleep(10);
 
     for (const client of [host, party]) {
         assert.equal(Number(client.character.questTrackerState ?? 0), 100);
@@ -218,20 +206,24 @@ async function main(): Promise<void> {
     const levelEntities = new Map(GlobalState.levelEntities);
     const levelQuestProgress = new Map(GlobalState.levelQuestProgress);
     const sessionsByToken = new Map(GlobalState.sessionsByToken);
+    const dungeonCompletions = new Map(GlobalState.dungeonCompletions);
 
     try {
         GlobalState.levelEntities.clear();
         GlobalState.levelQuestProgress.clear();
         GlobalState.sessionsByToken.clear();
+        GlobalState.dungeonCompletions.clear();
         await testKeepBossDeathCompletesQuestAfterCutsceneDespiteAliveHelpers();
 
         GlobalState.levelEntities.clear();
         GlobalState.levelQuestProgress.clear();
         GlobalState.sessionsByToken.clear();
+        GlobalState.dungeonCompletions.clear();
         await testKeepBossDeathPropagatesCompletionToParty();
     } finally {
         GlobalState.levelEntities = levelEntities;
         GlobalState.levelQuestProgress = levelQuestProgress;
+        GlobalState.dungeonCompletions = dungeonCompletions;
         GlobalState.sessionsByToken.clear();
         for (const [token, session] of sessionsByToken) {
             GlobalState.sessionsByToken.set(token, session);

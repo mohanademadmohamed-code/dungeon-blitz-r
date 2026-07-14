@@ -224,8 +224,6 @@ type DungeonRunHitContext = {
     targetEntity: any;
     damage: number;
 };
-
-const DUNGEON_RUN_DEBUG_ENABLED = String(process.env.DUNGEON_RUN_DEBUG ?? '').trim() === '1';
 const LIVE_BOSS_RUN_KILL_CAP = 160_000;
 
 function recordDungeonRunEvent(
@@ -1379,9 +1377,6 @@ export function finalizeDungeonRun(
 
     stats.finalizedAt = finalized.runEndTime;
     stats.finalizedStats = finalized;
-    if (DUNGEON_RUN_DEBUG_ENABLED) {
-        console.log(`[DungeonRunTracker] ${JSON.stringify(getDungeonRunDebugSnapshot(client) ?? finalized)}`);
-    }
     return finalized;
 }
 

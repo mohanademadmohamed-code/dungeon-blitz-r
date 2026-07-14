@@ -27,7 +27,6 @@ import { PetHandler } from './PetHandler';
 import { BuildingHandler } from './BuildingHandler';
 import { ForgeHandler } from './ForgeHandler';
 import { TalentHandler } from './TalentHandler';
-import { DebugLogger } from '../core/Debug';
 import { syncClientDungeonRunState } from '../core/DungeonRunStats';
 import { ensureCharacterSocialState, normalizeCharacterKey } from '../core/SocialState';
 import { getPartyIdForClient, areClientsInSameParty } from '../core/PartySync';
@@ -242,7 +241,7 @@ export class CharacterHandler {
     }
 
     private static isSessionStale(session: Client): boolean {
-        return session.socket.destroyed || session.socket.readyState !== 'open';
+        return !GlobalState.isClientConnectionOpen(session);
     }
 
     private static purgeSameCharacterGhosts(activeClient: Client, userId: number, characterName: string): void {
@@ -375,16 +374,10 @@ export class CharacterHandler {
             if (ensureSigilStoreAlertState(client.character)) {
                 client.characters = await db.saveCharacterSnapshot(client.userId, client.character);
             }
-            DebugLogger.logProgress('CharacterReload:loaded', client, loadedCharacter, {
-                source: 'disk'
-            });
             return;
         }
 
         client.characters = CharacterHandler.upsertCharacterList(loadedCharacters, client.character);
-        DebugLogger.logProgress('CharacterReload:missingOnDisk', client, client.character, {
-            source: 'memory'
-        });
     }
 
     private static resolveEnterWorldSpawn(
@@ -856,16 +849,6 @@ export class CharacterHandler {
 
         client.sendBitBuffer(0x1A, CharacterHandler.buildPaperDollPacket(character));
         CharacterHandler.broadcastLookUpdate(client);
-
-        DebugLogger.logProgress('CharacterLookChange:saved', client, character, {
-            headSet,
-            mouthSet,
-            hairSet,
-            faceSet,
-            gender,
-            hairColor: Number(hairColor ?? 0),
-            skinColor: Number(skinColor ?? 0)
-        });
     }
 
     static async handleLoginCharacterCreate(client: Client, data: Buffer): Promise<void> {
@@ -995,7 +978,14 @@ export class CharacterHandler {
         await BuildingHandler.syncCompletionState(client);
         await ForgeHandler.syncCompletionState(client);
         console.log(`[CharacterSelect] Selected ${char.name}`);
-        
+
+        if (
+            client.account &&
+            await LoginHandler.replaceAndWarnActiveAccountIdentityConflicts(client, client.account, char.name)
+        ) {
+            return;
+        }
+
         CharacterHandler.sendEnterWorld(client, char);
     }
 
@@ -1132,15 +1122,6 @@ export class CharacterHandler {
             char
         );
 
-        DebugLogger.logProgress('EnterWorld:initialPacket', client, char, {
-            transferToken: token,
-            targetLevel: currentLevelName,
-            targetSwf: levelSpec.swf,
-            previousLevel: previousLevelName,
-            previousSwf: '',
-            sendExtended: true
-        });
-
         // Store token mapping for persistence
         if (client.userId) {
             GlobalState.tokenChar.set(token, { character: char, userId: client.userId });
@@ -1269,33 +1250,7 @@ export class CharacterHandler {
             void db.saveCharacters(client.userId, client.characters);
         }
 
-        DebugLogger.logProgress('GameLogin:ready', client, client.character, {
-            token,
-            loginToken,
-            tokenResolution: pendingLogin.source,
-            firstLogin,
-            sendExtended,
-            levelSwf,
-            expectedLevelSwf,
-            levelSwfMatchesTarget: levelSwf === expectedLevelSwf,
-            isDev,
-            storyRepairDidMutate: storyRepair.didMutate,
-            storyRepairAddedMissionId: storyRepair.addedMissionId,
-            companionRepairDidMutate,
-            socialRepairDidMutate,
-            abilityRepairDidMutate
-        });
-
         if (levelSwf !== expectedLevelSwf) {
-            DebugLogger.logProgress('GameLogin:swfMismatch', client, client.character, {
-                token,
-                loginToken,
-                targetLevel: entry.targetLevel,
-                expectedLevelSwf,
-                clientLevelSwf: levelSwf,
-                firstLogin,
-                sendExtended
-            });
         }
 
         CharacterHandler.purgeSameCharacterGhosts(client, entry.userId, entry.character.name);
@@ -1367,13 +1322,6 @@ export class CharacterHandler {
 
         client.send(0x10, pdBuffer);
         console.log(`[GameLogin] Sent 0x10 (Player Data)`);
-        DebugLogger.logProgress('GameLogin:sentPlayerData', client, client.character, {
-            token,
-            sendExtended,
-            targetLevel: entry.targetLevel,
-            payloadLength: pdBuffer.length,
-            payloadPreview: DebugLogger.previewBuffer(pdBuffer)
-        });
 
         MissionHandler.syncMissionStateToClient(client);
         CharacterHandler.sendBootstrappedStoryMission(client, storyRepair.addedMissionId);

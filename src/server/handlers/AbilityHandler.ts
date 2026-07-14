@@ -1,7 +1,6 @@
 import abilityTypes from '../data/AbilityTypes.json';
 import { JsonAdapter } from '../database/JsonAdapter';
 import { Client } from '../core/Client';
-import { DebugLogger } from '../core/Debug';
 import { MasterClassID } from '../core/Enums';
 import { TalentConfig } from '../core/TalentConfig';
 import { BitReader } from '../network/protocol/bitReader';
@@ -82,38 +81,13 @@ export class AbilityHandler {
         const rank = br.readMethod20(4);
         const payWithIdols = br.readMethod15();
         AbilityHandler.repairCharacterAbilityState(client.character);
-        DebugLogger.logProgress('AbilityResearch:startRequest', client, client.character, {
-            abilityId,
-            rank,
-            payWithIdols,
-            raw: DebugLogger.previewBuffer(data)
-        });
 
         if (abilityId <= 0 || rank <= 0) {
-            DebugLogger.logProgress('AbilityResearch:startRejected', client, client.character, {
-                abilityId,
-                rank,
-                payWithIdols,
-                reason: 'invalid_ability_or_rank',
-                raw: DebugLogger.previewBuffer(data)
-            });
             return;
         }
 
         const skillResearch = AbilityHandler.getSkillResearch(client.character);
         if (Number(skillResearch.abilityID ?? 0) !== 0) {
-            DebugLogger.logProgress('AbilityResearch:startRejected', client, client.character, {
-                abilityId,
-                rank,
-                payWithIdols,
-                reason: 'research_already_active',
-                existingResearch: {
-                    abilityID: Number(skillResearch.abilityID ?? 0),
-                    rank: Number(skillResearch.rank ?? 0),
-                    ReadyTime: Number(skillResearch.ReadyTime ?? 0)
-                },
-                raw: DebugLogger.previewBuffer(data)
-            });
             return;
         }
 
@@ -125,12 +99,6 @@ export class AbilityHandler {
         ) {
             currentRank = rank - 1;
             AbilityHandler.setLearnedAbilityRank(client.character, abilityId, currentRank);
-            DebugLogger.logProgress('AbilityResearch:inferredDisciplineRank', client, client.character, {
-                abilityId,
-                inferredRank: currentRank,
-                requestedRank: rank,
-                raw: DebugLogger.previewBuffer(data)
-            });
         }
         if (rank !== currentRank + 1) {
             if (AbilityHandler.shouldTreatAsTutorialEcho(client, abilityId, rank, currentRank)) {
@@ -141,38 +109,14 @@ export class AbilityHandler {
                     tutorialEcho: true
                 };
                 await AbilityHandler.saveCharacter(client);
-                DebugLogger.logProgress('AbilityResearch:tutorialEchoAccepted', client, client.character, {
-                    abilityId,
-                    rank,
-                    currentRank,
-                    payWithIdols,
-                    raw: DebugLogger.previewBuffer(data)
-                });
                 AbilityHandler.sendAbilityResearchDone(client, abilityId);
                 return;
             }
-
-            DebugLogger.logProgress('AbilityResearch:startRejected', client, client.character, {
-                abilityId,
-                rank,
-                currentRank,
-                expectedRank: currentRank + 1,
-                payWithIdols,
-                reason: 'rank_not_next_upgrade',
-                raw: DebugLogger.previewBuffer(data)
-            });
             return;
         }
 
         const abilityDef = AbilityHandler.getAbilityDef(abilityId, rank);
         if (!abilityDef) {
-            DebugLogger.logProgress('AbilityResearch:startRejected', client, client.character, {
-                abilityId,
-                rank,
-                payWithIdols,
-                reason: 'missing_ability_definition',
-                raw: DebugLogger.previewBuffer(data)
-            });
             return;
         }
 
@@ -183,15 +127,6 @@ export class AbilityHandler {
         if (payWithIdols) {
             const idols = Number(client.character.mammothIdols ?? 0);
             if (idols < idolCost) {
-                DebugLogger.logProgress('AbilityResearch:startRejected', client, client.character, {
-                    abilityId,
-                    rank,
-                    payWithIdols,
-                    idolCost,
-                    idols,
-                    reason: 'not_enough_idols',
-                    raw: DebugLogger.previewBuffer(data)
-                });
                 return;
             }
 
@@ -203,26 +138,11 @@ export class AbilityHandler {
 
             const claimResult = AbilityHandler.applyCompletedAbilityResearch(client.character);
             if (!claimResult) {
-                DebugLogger.logProgress('AbilityResearch:startRejected', client, client.character, {
-                    abilityId,
-                    rank,
-                    payWithIdols,
-                    idolCost,
-                    reason: 'invalid_instant_research',
-                    raw: DebugLogger.previewBuffer(data)
-                });
                 return;
             }
 
             client.character.mammothIdols = idols - idolCost;
             await AbilityHandler.saveCharacter(client);
-            DebugLogger.logProgress('AbilityResearch:instantApplied', client, client.character, {
-                abilityId,
-                rank,
-                idolCost,
-                targetRank: claimResult.targetRank,
-                applied: claimResult.applied
-            });
             AbilityHandler.sendPremiumPurchase(client, 'AbilityResearch', idolCost);
             AbilityHandler.sendAbilityResearchDone(client, abilityId);
             AbilityHandler.refreshPlayerSnapshot(client);
@@ -230,15 +150,6 @@ export class AbilityHandler {
         } else {
             const gold = Number(client.character.gold ?? 0);
             if (gold < goldCost) {
-                DebugLogger.logProgress('AbilityResearch:startRejected', client, client.character, {
-                    abilityId,
-                    rank,
-                    payWithIdols,
-                    goldCost,
-                    gold,
-                    reason: 'not_enough_gold',
-                    raw: DebugLogger.previewBuffer(data)
-                });
                 return;
             }
             client.character.gold = gold - goldCost;
@@ -252,12 +163,6 @@ export class AbilityHandler {
         };
 
         await AbilityHandler.saveCharacter(client);
-        DebugLogger.logProgress('AbilityResearch:started', client, client.character, {
-            abilityId,
-            rank,
-            payWithIdols,
-            upgradeTime
-        });
     }
 
     static async handleClaimAbilityResearch(client: Client): Promise<void> {
@@ -265,44 +170,25 @@ export class AbilityHandler {
 
         const skillResearch = AbilityHandler.getSkillResearch(client.character);
         const abilityId = Number(skillResearch.abilityID ?? 0);
-        DebugLogger.logProgress('AbilityResearch:claimRequest', client, client.character, {
-            abilityId
-        });
         if (abilityId === 0) {
-            DebugLogger.logProgress('AbilityResearch:claimRejected', client, client.character, {
-                reason: 'no_active_research'
-            });
             return;
         }
 
         const readyTime = Number(skillResearch.ReadyTime ?? 0);
         const now = Math.floor(Date.now() / 1000);
         if (readyTime > 0 && readyTime > now) {
-            DebugLogger.logProgress('AbilityResearch:claimRejected', client, client.character, {
-                abilityId,
-                readyTime,
-                now,
-                reason: 'research_not_ready'
-            });
             return;
         }
 
         const claimResult = AbilityHandler.applyCompletedAbilityResearch(client.character);
         if (!claimResult) {
-            DebugLogger.logProgress('AbilityResearch:claimRejected', client, client.character, {
-                abilityId,
-                reason: 'invalid_completed_research'
-            });
             return;
         }
 
         await AbilityHandler.saveCharacter(client);
         if (claimResult.tutorialEcho && !claimResult.applied) {
-            DebugLogger.logProgress('AbilityResearch:claimTutorialEcho', client, client.character, claimResult);
             return;
         }
-
-        DebugLogger.logProgress('AbilityResearch:claimed', client, client.character, claimResult);
         AbilityHandler.refreshPlayerSnapshot(client);
     }
 
@@ -311,7 +197,6 @@ export class AbilityHandler {
 
         client.character.SkillResearch = {};
         await AbilityHandler.saveCharacter(client);
-        DebugLogger.logProgress('AbilityResearch:cleared', client, client.character);
     }
 
     static async handleSpeedupAbilityResearch(client: Client, data: Buffer): Promise<void> {
@@ -321,29 +206,12 @@ export class AbilityHandler {
         const idolCost = br.readMethod9();
         const skillResearch = AbilityHandler.getSkillResearch(client.character);
         const abilityId = Number(skillResearch.abilityID ?? 0);
-        DebugLogger.logProgress('AbilityResearch:speedupRequest', client, client.character, {
-            abilityId,
-            idolCost,
-            raw: DebugLogger.previewBuffer(data)
-        });
         if (abilityId === 0) {
-            DebugLogger.logProgress('AbilityResearch:speedupRejected', client, client.character, {
-                idolCost,
-                reason: 'no_active_research',
-                raw: DebugLogger.previewBuffer(data)
-            });
             return;
         }
 
         const idols = Number(client.character.mammothIdols ?? 0);
         if (idols < idolCost) {
-            DebugLogger.logProgress('AbilityResearch:speedupRejected', client, client.character, {
-                abilityId,
-                idolCost,
-                idols,
-                reason: 'not_enough_idols',
-                raw: DebugLogger.previewBuffer(data)
-            });
             return;
         }
 
@@ -354,24 +222,12 @@ export class AbilityHandler {
 
         const claimResult = AbilityHandler.applyCompletedAbilityResearch(client.character);
         if (!claimResult) {
-            DebugLogger.logProgress('AbilityResearch:speedupRejected', client, client.character, {
-                abilityId,
-                idolCost,
-                reason: 'invalid_completed_research',
-                raw: DebugLogger.previewBuffer(data)
-            });
             return;
         }
 
         client.character.mammothIdols = idols - idolCost;
 
         await AbilityHandler.saveCharacter(client);
-        DebugLogger.logProgress('AbilityResearch:speedupApplied', client, client.character, {
-            abilityId,
-            idolCost,
-            targetRank: claimResult.targetRank,
-            applied: claimResult.applied
-        });
         AbilityHandler.sendPremiumPurchase(client, 'AbilitySpeedup', idolCost);
         AbilityHandler.sendAbilityResearchDone(client, abilityId);
         AbilityHandler.refreshPlayerSnapshot(client);

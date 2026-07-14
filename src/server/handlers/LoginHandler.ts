@@ -23,6 +23,11 @@ interface LoginPayload {
     password: string;
 }
 
+interface AccountIdentityConflictSet {
+    sessions: Client[];
+    pendingWorldLocks: Array<[number, PendingTransfer]>;
+}
+
 export class LoginHandler {
     public static db: JsonAdapter = new JsonAdapter();
     private static readonly discordOAuthAutoAuthenticatedClients = new WeakSet<Client>();
@@ -89,7 +94,12 @@ export class LoginHandler {
         return now - Math.round(pendingSince) <= LoginHandler.PENDING_WORLD_LOGIN_LOCK_TTL_MS;
     }
 
-    private static clearStalePendingWorldLoginLock(token: number, entry: PendingTransfer, accountEmail: string): void {
+    private static clearStalePendingWorldLoginLock(
+        token: number,
+        entry: PendingTransfer,
+        accountEmail: string,
+        reason: 'stale' | 'replaced' = 'stale'
+    ): void {
         GlobalState.pendingWorld.delete(token);
         GlobalState.pendingExtended.delete(token);
         GlobalState.pendingTeleports.delete(token);
@@ -105,33 +115,79 @@ export class LoginHandler {
 
         const characterName = String(entry.character?.name ?? '').trim() || '(unknown)';
         console.warn(
-            `[Login] Cleared stale pending world login lock for ${accountEmail} token=${token} character=${characterName}`
+            `[Login] Cleared ${reason} pending world login lock for ${accountEmail} token=${token} character=${characterName}`
         );
     }
 
-    public static async findActiveAccountIdentityConflict(
+    private static async collectActiveAccountIdentityConflicts(
         account: UserAccount,
-        excludedClient?: Client | null
-    ): Promise<Client | true | null> {
+        excludedClient?: Client | null,
+        selectedCharacterName?: string | null
+    ): Promise<AccountIdentityConflictSet> {
+        const sessions: Client[] = [];
+        const candidates = new Set<Client>();
+        const pendingWorldLocks: Array<[number, PendingTransfer]> = [];
         const accountUserId = Math.max(0, Math.round(Number(account.user_id ?? 0)));
-        for (const session of GlobalState.getOpenClients()) {
+        const selectedCharacterKey = String(selectedCharacterName ?? '').trim().toLowerCase();
+
+        const addCandidate = (session: Client | null | undefined): void => {
+            if (!session || session === excludedClient) {
+                return;
+            }
+
+            const socket = (session as unknown as { socket?: { destroyed?: boolean } }).socket;
+            if (socket?.destroyed) {
+                return;
+            }
+
+            candidates.add(session);
+        };
+
+        for (const client of GlobalState.clients) {
+            addCandidate(client);
+        }
+        for (const session of GlobalState.sessionsByToken.values()) {
+            addCandidate(session);
+        }
+        for (const session of GlobalState.sessionsByUserId.values()) {
+            addCandidate(session);
+        }
+        for (const session of GlobalState.sessionsByCharacterName.values()) {
+            addCandidate(session);
+        }
+        if (accountUserId > 0) {
+            addCandidate(GlobalState.sessionsByUserId.get(accountUserId));
+        }
+        if (selectedCharacterKey) {
+            addCandidate(GlobalState.sessionsByCharacterName.get(selectedCharacterKey));
+        }
+
+        for (const session of candidates) {
             if (session === excludedClient) {
                 continue;
             }
 
             const sessionUserId = Math.max(0, Math.round(Number(session.userId ?? 0)));
+            const sessionCharacterKey = String(session.character?.name ?? '').trim().toLowerCase();
+            if (selectedCharacterKey && sessionCharacterKey === selectedCharacterKey) {
+                sessions.push(session);
+                continue;
+            }
+
             if (accountUserId > 0 && sessionUserId === accountUserId) {
-                return session;
+                sessions.push(session);
+                continue;
             }
 
             if (GlobalState.accountsShareIdentity(session.account, account)) {
-                return session;
+                sessions.push(session);
+                continue;
             }
 
             if (sessionUserId > 0) {
                 const sessionAccount = await LoginHandler.db.getAccountById(sessionUserId);
                 if (GlobalState.accountsShareIdentity(sessionAccount, account)) {
-                    return session;
+                    sessions.push(session);
                 }
             }
         }
@@ -155,13 +211,103 @@ export class LoginHandler {
             }
 
             if (LoginHandler.isFreshPendingWorldLoginLock(entry, now)) {
-                return true;
+                pendingWorldLocks.push([token, entry]);
+                continue;
             }
 
             LoginHandler.clearStalePendingWorldLoginLock(token, entry, account.email);
         }
 
-        return null;
+        return { sessions, pendingWorldLocks };
+    }
+
+    private static async disconnectReplacedSession(session: Client, replacementEmail: string): Promise<void> {
+        const sessionUserId = Number(session.userId ?? 0);
+        const characterName = String(session.character?.name ?? '').trim() || '(none)';
+        const socket = session.socket as Client['socket'] & {
+            destroy?: () => void;
+            end?: () => void;
+            unref?: () => void;
+        };
+        if (socket && !socket.destroyed) {
+            try {
+                socket.end?.();
+            } catch {
+                // Ignore close races; the follow-up destroy forces the disconnect.
+            }
+
+            if (!socket.destroyed && typeof socket.destroy === 'function') {
+                socket.destroy();
+            }
+        }
+
+        try {
+            await session.resetForLoginCycle(`replacement login for ${replacementEmail}`);
+        } catch (err) {
+            console.error(
+                `[Login] Failed to persist replaced session after disconnect: ` +
+                `replacement=${replacementEmail} userId=${sessionUserId} char=${characterName}`,
+                err
+            );
+        }
+
+        console.warn(
+            `[Login] Replaced active session for ${replacementEmail}: ` +
+            `oldUserId=${sessionUserId || 0} oldChar=${characterName}`
+        );
+    }
+
+    private static hasAccountIdentityConflicts(conflicts: AccountIdentityConflictSet): boolean {
+        return conflicts.sessions.length > 0 || conflicts.pendingWorldLocks.length > 0;
+    }
+
+    private static async replaceCollectedAccountIdentityConflicts(
+        account: UserAccount,
+        conflicts: AccountIdentityConflictSet
+    ): Promise<boolean> {
+        const hadConflicts = LoginHandler.hasAccountIdentityConflicts(conflicts);
+        for (const [token, entry] of conflicts.pendingWorldLocks) {
+            LoginHandler.clearStalePendingWorldLoginLock(token, entry, account.email, 'replaced');
+        }
+
+        for (const session of conflicts.sessions) {
+            await LoginHandler.disconnectReplacedSession(session, account.email);
+        }
+
+        return hadConflicts;
+    }
+
+    public static async replaceActiveAccountIdentityConflicts(
+        account: UserAccount,
+        excludedClient?: Client | null,
+        selectedCharacterName?: string | null
+    ): Promise<boolean> {
+        const conflicts = await LoginHandler.collectActiveAccountIdentityConflicts(account, excludedClient, selectedCharacterName);
+        return LoginHandler.replaceCollectedAccountIdentityConflicts(account, conflicts);
+    }
+
+    public static async replaceAndWarnActiveAccountIdentityConflicts(
+        client: Client,
+        account: UserAccount,
+        selectedCharacterName?: string | null
+    ): Promise<boolean> {
+        const conflicts = await LoginHandler.collectActiveAccountIdentityConflicts(account, client, selectedCharacterName);
+        if (!LoginHandler.hasAccountIdentityConflicts(conflicts)) {
+            console.warn(
+                `[Login] No active account identity conflict found for ${account.email} ` +
+                `character=${String(selectedCharacterName ?? '').trim() || '(none)'} at enter-game replacement check`
+            );
+            return false;
+        }
+
+        console.warn(
+            `[Login] Replacing account identity conflicts for ${account.email}: ` +
+            `character=${String(selectedCharacterName ?? '').trim() || '(none)'} ` +
+            `sessions=${conflicts.sessions.length} pendingWorld=${conflicts.pendingWorldLocks.length}`
+        );
+        await LoginHandler.replaceCollectedAccountIdentityConflicts(account, conflicts);
+        LoginHandler.sendPopup(client, CONCURRENT_ACCOUNT_EMAIL_MESSAGE, false);
+        return true;
     }
 
     private static async completeAuthentication(
@@ -171,10 +317,6 @@ export class LoginHandler {
         resetForLoginCycle: boolean = false,
         sendCharacters: boolean = true
     ): Promise<void> {
-        if (await LoginHandler.rejectIfAccountIdentityAlreadyOpen(client, account)) {
-            return;
-        }
-
         if (resetForLoginCycle) {
             await client.resetForLoginCycle(reason);
         }
@@ -194,21 +336,6 @@ export class LoginHandler {
         if (sendCharacters) {
             LoginHandler.sendCharacterList(client);
         }
-    }
-
-    private static async rejectIfAccountIdentityAlreadyOpen(client: Client, account: UserAccount): Promise<boolean> {
-        const activeConflict = await LoginHandler.findActiveAccountIdentityConflict(account, client);
-        if (!activeConflict) {
-            return false;
-        }
-
-        LoginHandler.clearFailedAuthState(client);
-        console.warn(
-            `[Login] Authentication rejected for ${account.email}: active session already uses this account email identity`
-        );
-        LoginHandler.sendPopup(client, CONCURRENT_ACCOUNT_EMAIL_MESSAGE, false);
-        LoginHandler.issueChallenge(client);
-        return true;
     }
 
     private static scheduleDiscordOAuthCharacterListRetry(client: Client, account: UserAccount): void {
@@ -270,12 +397,6 @@ export class LoginHandler {
 
         const payload = LoginHandler.parseLoginPayload(data);
         const email = payload?.email ?? '';
-        if (payload) {
-            const existingAccount = await LoginHandler.db.getAccount(email);
-            if (existingAccount && await LoginHandler.rejectIfAccountIdentityAlreadyOpen(client, existingAccount)) {
-                return;
-            }
-        }
         LoginHandler.rejectLogin(
             client,
             email,

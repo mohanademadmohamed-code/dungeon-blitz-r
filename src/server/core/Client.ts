@@ -3,7 +3,6 @@ import { BitBuffer } from '../network/protocol/bitBuffer';
 import { PacketRouter } from '../network/packetRouter';
 import { UserAccount, Character } from '../database/Database';
 import { JsonAdapter } from '../database/JsonAdapter';
-import { DebugLogger } from './Debug';
 import type { DungeonRunStats } from './DungeonRunStats';
 import { clearStoredDungeonSnapshot } from './DungeonSnapshot';
 import { LevelConfig } from './LevelConfig';
@@ -208,20 +207,14 @@ export class Client {
     public keepTutorialState: KeepTutorialState | null = null;
     public goblinRiverBossIntroLockUntil: number = 0;
     public goblinRiverBossIntroUnlockTimer: NodeJS.Timeout | null = null;
-    public forcedDungeonCompletionScope: string = "";
-    public finalizingDungeonCompletionScope: string = "";
-    public completedDungeonCompletionScope: string = "";
-    public completedDungeonCompletionSentAt: number = 0;
     public pendingDungeonCompletionScope: string = "";
     public pendingDungeonCompletionRequestedAt: number = 0;
     public pendingDungeonCompletionLastSkitAt: number = 0;
     public pendingDungeonCompletionNotBeforeAt: number = 0;
     public pendingDungeonCompletionSettleMs: number = 0;
     public pendingDungeonCompletionPayload: Buffer | null = null;
-    public pendingDungeonCompletionForceSharedScope: string = "";
     public pendingDungeonCompletionTimer: NodeJS.Timeout | null = null;
     public pendingDungeonCompletionFlushActive: boolean = false;
-    public pendingDungeonCompletionWaitForCutsceneEnd: boolean = false;
     public deferredCharacterSaveTimer: NodeJS.Timeout | null = null;
     public deferredCharacterSaveReason: string = "";
     public activeDungeonCutsceneScope: string = "";
@@ -268,7 +261,6 @@ export class Client {
 
             const payload = Buffer.from(this.buffer.subarray(4, total));
             this.buffer = this.buffer.subarray(total);
-            DebugLogger.logPacket('IN', this, packetId, payload);
 
             this.packetQueue = this.packetQueue
                 .then(() => this.router.handle(this, packetId, payload))
@@ -315,7 +307,6 @@ export class Client {
         const header = Buffer.alloc(4);
         header.writeUInt16BE(packetId, 0);
         header.writeUInt16BE(buffer.length, 2);
-        DebugLogger.logPacket('OUT', this, packetId, buffer);
         const payload = Buffer.concat([header, buffer]);
         this.rawBytesOut += payload.length;
         this.scheduleOutboundUncork();
@@ -468,23 +459,17 @@ export class Client {
             this.goblinRiverBossIntroUnlockTimer = null;
         }
         this.goblinRiverBossIntroLockUntil = 0;
-        this.forcedDungeonCompletionScope = "";
-        this.finalizingDungeonCompletionScope = "";
-        this.completedDungeonCompletionScope = "";
-        this.completedDungeonCompletionSentAt = 0;
         this.pendingDungeonCompletionScope = "";
         this.pendingDungeonCompletionRequestedAt = 0;
         this.pendingDungeonCompletionLastSkitAt = 0;
         this.pendingDungeonCompletionNotBeforeAt = 0;
         this.pendingDungeonCompletionSettleMs = 0;
         this.pendingDungeonCompletionPayload = null;
-        this.pendingDungeonCompletionForceSharedScope = "";
         if (this.pendingDungeonCompletionTimer) {
             clearTimeout(this.pendingDungeonCompletionTimer);
             this.pendingDungeonCompletionTimer = null;
         }
         this.pendingDungeonCompletionFlushActive = false;
-        this.pendingDungeonCompletionWaitForCutsceneEnd = false;
         this.activeDungeonCutsceneScope = "";
         this.activeDungeonCutsceneRoomId = 0;
         this.activeDungeonCutsceneJoinedAtDialogIndex = 0;
@@ -724,6 +709,11 @@ export class Client {
 
         SocialHandler.handleSessionClose(this, transferInProgress);
 
+        if (!transferInProgress) {
+            const { DungeonCompletionSystem } = require('./DungeonCompletionSystem') as typeof import('./DungeonCompletionSystem');
+            DungeonCompletionSystem.releaseParticipant(this);
+        }
+
         this.clearGameplayState();
         this.clearIdentityState();
     }
@@ -765,6 +755,7 @@ export class Client {
         const { GlobalState } = require('./GlobalState') as typeof import('./GlobalState');
         const addr = `${this.socket.remoteAddress}:${this.socket.remotePort}`;
         const snapshot = this.createSessionCleanupSnapshot();
+        GlobalState.clients.delete(this);
 
         if (snapshot.userId && this.character) {
             if (this.deferredCharacterSaveTimer) {

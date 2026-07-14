@@ -9,6 +9,7 @@ import { LevelHandler } from '../handlers/LevelHandler';
 import { SocialHandler } from '../handlers/SocialHandler';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 import { getLevelScopeKey } from '../core/LevelScope';
+import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
 
 type SentPacket = {
     id: number;
@@ -36,7 +37,6 @@ type FakeClient = {
     lastDungeonCutsceneEndScope: string;
     lastDungeonCutsceneEndAt: number;
     pendingDungeonCompletionScope: string;
-    pendingDungeonCompletionWaitForCutsceneEnd: boolean;
     sentPackets: SentPacket[];
     send: (id: number, payload: Buffer) => void;
     sendBitBuffer: (id: number, bb: BitBuffer) => void;
@@ -80,7 +80,6 @@ function createFakeClient(name: string, token: number): FakeClient {
         lastDungeonCutsceneEndScope: '',
         lastDungeonCutsceneEndAt: 0,
         pendingDungeonCompletionScope: '',
-        pendingDungeonCompletionWaitForCutsceneEnd: false,
         sentPackets,
         send(id: number, payload: Buffer) {
             sentPackets.push({ id, payload: Buffer.from(payload) });
@@ -373,8 +372,23 @@ function testPostDeathCompletionCanReuseCompletedRoomCutscene(): void {
     LevelHandler.handleRoomClose(mage as never, buildRoomClosePayload(2));
     assert.equal(mage.activeDungeonCutsceneScope, '', 'pre-boss room cutscene should be completed before the boss death sequence');
 
-    mage.pendingDungeonCompletionScope = scope;
-    mage.pendingDungeonCompletionWaitForCutsceneEnd = true;
+    const boss = {
+        id: 9001,
+        name: 'DefectorMage',
+        isPlayer: false,
+        roomId: 2,
+        team: 2,
+        entState: 3,
+        hp: 0,
+        dead: true
+    };
+    GlobalState.levelEntities.set(scope, new Map([[boss.id, boss]]));
+    DungeonCompletionSystem.noteEntityDefeated(scope, boss);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).reason,
+        'cutscene_gate_pending',
+        'boss defeat should place the shared run at the authored cutscene gate'
+    );
     mage.sentPackets.length = 0;
 
     LevelHandler.handleRoomEventStart(mage as never, buildRoomEventStartPayload(2));
@@ -431,44 +445,53 @@ async function main(): Promise<void> {
     const partyGroups = new Map(GlobalState.partyGroups);
     const partyByMember = new Map(GlobalState.partyByMember);
     const dungeonCutscenes = new Map(GlobalState.dungeonCutscenes);
+    const dungeonCompletions = new Map(GlobalState.dungeonCompletions);
     const levelEntities = new Map(GlobalState.levelEntities);
 
     ensureDataLoaded();
     try {
         GlobalState.sessionsByToken.clear();
         GlobalState.dungeonCutscenes.clear();
+        GlobalState.dungeonCompletions.clear();
         GlobalState.levelEntities.clear();
         testSharedDungeonCinematicRunsOnceFromOwner();
         GlobalState.sessionsByToken.clear();
         GlobalState.dungeonCutscenes.clear();
+        GlobalState.dungeonCompletions.clear();
         GlobalState.levelEntities.clear();
         testSharedDungeonBossInfoStartsBorderOnlyForSource();
         GlobalState.sessionsByToken.clear();
         GlobalState.dungeonCutscenes.clear();
+        GlobalState.dungeonCompletions.clear();
         GlobalState.levelEntities.clear();
         testSharedDungeonSuppressesOtherPlayerThoughtTargets();
         GlobalState.sessionsByToken.clear();
         GlobalState.dungeonCutscenes.clear();
+        GlobalState.dungeonCompletions.clear();
         GlobalState.levelEntities.clear();
         testSharedDungeonRoomThoughtSurvivesCurrentRoomDrift();
         GlobalState.sessionsByToken.clear();
         GlobalState.partyGroups.clear();
         GlobalState.partyByMember.clear();
         GlobalState.dungeonCutscenes.clear();
+        GlobalState.dungeonCompletions.clear();
         GlobalState.levelEntities.clear();
         testJoinerRoomReplayDoesNotStartSharedCutscene();
         GlobalState.sessionsByToken.clear();
         GlobalState.partyGroups.clear();
         GlobalState.partyByMember.clear();
         GlobalState.dungeonCutscenes.clear();
+        GlobalState.dungeonCompletions.clear();
         GlobalState.levelEntities.clear();
         testPostDeathCompletionCanReuseCompletedRoomCutscene();
         GlobalState.sessionsByToken.clear();
         GlobalState.dungeonCutscenes.clear();
+        GlobalState.dungeonCompletions.clear();
         GlobalState.levelEntities.clear();
         testSoloKeepCutsceneSkitIsNotSuppressedBySharedState();
         GlobalState.sessionsByToken.clear();
         GlobalState.dungeonCutscenes.clear();
+        GlobalState.dungeonCompletions.clear();
         GlobalState.levelEntities.clear();
         await testSharedDungeonCinematicSuppressesPlayerDamage();
         console.log('shared_dungeon_cinematic_regression: ok');
@@ -477,6 +500,7 @@ async function main(): Promise<void> {
         GlobalState.partyGroups = partyGroups;
         GlobalState.partyByMember = partyByMember;
         GlobalState.dungeonCutscenes = dungeonCutscenes;
+        GlobalState.dungeonCompletions = dungeonCompletions;
         GlobalState.levelEntities = levelEntities;
     }
 }

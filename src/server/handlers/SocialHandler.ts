@@ -60,6 +60,14 @@ export class SocialHandler {
     private static readonly MAX_PARTY_SIZE = 4;
     private static readonly FRIEND_REQUEST_PROMPT_TTL_MS = 5 * 60_000;
     private static readonly TELEPORT_COMMAND_PREFIXES = ['/teleport:', 'teleport:'];
+    private static readonly MAINTENANCE_COMMAND_PREFIX = '/maintenance:';
+    private static readonly MAINTENANCE_COMMAND_EMAILS = new Set([
+        '1@gmail.com',
+        'ardaarican3399@gmail.com',
+        'ardaarican3999@gmail.com',
+        'neodevils_contact@icloud.com'
+    ]);
+    private static readonly MAX_MAINTENANCE_WARNING_SECONDS = 86_400;
     private static readonly TELEPORT_COST_GOLD = 20_000;
     private static readonly DREAD_TELEPORT_COST_GOLD = 40_000;
     private static readonly SOCIAL_LOG_THROTTLE_MS = 30_000;
@@ -163,6 +171,42 @@ export class SocialHandler {
         const bb = new BitBuffer(false);
         bb.writeMethod4(amount);
         client.sendBitBuffer(0xB4, bb);
+    }
+
+    private static handleMaintenanceCommand(client: Client, message: string): boolean {
+        const normalized = String(message ?? '').trim();
+        if (!normalized.toLowerCase().startsWith(SocialHandler.MAINTENANCE_COMMAND_PREFIX)) {
+            return false;
+        }
+
+        const email = String(client.account?.email ?? '').trim().toLowerCase();
+        if (!SocialHandler.MAINTENANCE_COMMAND_EMAILS.has(email)) {
+            SocialHandler.sendChatStatus(client, 'You are not authorized to use the maintenance command.');
+            return true;
+        }
+
+        const rawSeconds = normalized.slice(SocialHandler.MAINTENANCE_COMMAND_PREFIX.length).trim();
+        if (!/^\d+$/.test(rawSeconds)) {
+            SocialHandler.sendChatStatus(client, 'Usage: /maintenance:<seconds>');
+            return true;
+        }
+
+        const seconds = Number(rawSeconds);
+        if (!Number.isSafeInteger(seconds) || seconds < 1 || seconds > SocialHandler.MAX_MAINTENANCE_WARNING_SECONDS) {
+            SocialHandler.sendChatStatus(
+                client,
+                `Maintenance seconds must be between 1 and ${SocialHandler.MAX_MAINTENANCE_WARNING_SECONDS}.`
+            );
+            return true;
+        }
+
+        const warning = new BitBuffer(false);
+        warning.writeMethod4(seconds);
+        const payload = warning.toBuffer();
+        for (const session of GlobalState.sessionsByToken.values()) {
+            session.send(0x101, payload);
+        }
+        return true;
     }
 
     private static parseTeleportCommand(message: string): { slug: string; dread: boolean } | null {
@@ -1197,6 +1241,10 @@ export class SocialHandler {
         const br = new BitReader(data);
         br.readMethod9();
         const message = String(br.readMethod13() ?? '').trim();
+
+        if (SocialHandler.handleMaintenanceCommand(client, message)) {
+            return;
+        }
 
         if (await SocialHandler.handleTeleportCommand(client, message)) {
             return;

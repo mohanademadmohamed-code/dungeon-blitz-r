@@ -46,7 +46,7 @@ export class EquipmentHandler {
             changedSlots.add(slot);
         }
 
-        await EquipmentHandler.persistAndBroadcast(client, entityId, changedSlots);
+        EquipmentHandler.persistAndBroadcast(client, entityId, changedSlots);
     }
 
     static async handleUpdateSingleGear(client: Client, data: Buffer): Promise<void> {
@@ -64,7 +64,7 @@ export class EquipmentHandler {
         const gearId = br.readMethod20(11);
         EquipmentHandler.applyGearToSlot(client, slot, gearId);
 
-        await EquipmentHandler.persistAndBroadcast(client, entityId, new Set([slot]));
+        EquipmentHandler.persistAndBroadcast(client, entityId, new Set([slot]));
     }
 
     static async handleSocketCharm(client: Client, data: Buffer): Promise<void> {
@@ -122,7 +122,7 @@ export class EquipmentHandler {
         EquipmentHandler.updateLiveEntity(client);
 
         const changedSlot = gearIndex + 1;
-        await EquipmentHandler.persistAndBroadcast(client, entityId, new Set([changedSlot]));
+        EquipmentHandler.persistAndBroadcast(client, entityId, new Set([changedSlot]));
         EquipmentHandler.sendGearToSelf(client);
     }
 
@@ -458,21 +458,28 @@ export class EquipmentHandler {
         );
     }
 
-    private static async persistAndBroadcast(client: Client, entityId: number, changedSlots: Set<number>): Promise<void> {
+    private static persistAndBroadcast(client: Client, entityId: number, changedSlots: Set<number>): void {
         if (!client.character || changedSlots.size === 0) {
             return;
         }
 
         EquipmentHandler.upsertCharacterSnapshot(client);
-        if (client.userId) {
-            await db.saveCharacters(client.userId, client.characters);
-        }
-
         EquipmentHandler.broadcastEquipmentUpdate(client, entityId, changedSlots);
         EntityHandler.refreshPlayerSnapshot(client);
         client.combatStatsDirty = true;
         client.allowDirtyCombatStatsRegen = true;
         client.lastCombatStatsRefreshRequestAt = Date.now();
         CharacterSync.requestCombatStatsRefresh(client);
+
+        if (!client.userId) {
+            return;
+        }
+        if (typeof client.scheduleCharacterSave === 'function') {
+            client.scheduleCharacterSave('equipment update');
+            return;
+        }
+        void db.saveCharacters(client.userId, client.characters).catch((error) => {
+            console.error('[EquipmentHandler] Deferred equipment save failed:', error);
+        });
     }
 }
