@@ -197,8 +197,13 @@ const DISCORD_LINKED_ROLES_CONNECT_URL = parseStringEnv(
     'DISCORD_LINKED_ROLES_CONNECT_URL',
     'https://discord-github-assistant-bot.vercel.app/api/discord-linked-roles/connect'
 );
-const MONGODB_URI = parseStringEnv('MONGODB_URI', '');
-const MONGODB_DB_NAME = parseStringEnv('MONGODB_DB_NAME', 'dungeon_blitz_r');
+// GAME_MONGODB_* is shared with the Discord account service. MONGO_DB_NAME is
+// deliberately excluded because legacy deployments use it for sponsor data.
+const MONGODB_URI = parseStringEnv('GAME_MONGODB_URI', parseStringEnv('MONGODB_URI', ''));
+const MONGODB_DB_NAME = parseStringEnv(
+    'GAME_MONGODB_DB_NAME',
+    parseStringEnv('MONGODB_DB_NAME', 'minidb')
+);
 const SPONSOR_MONGODB_URI = parseStringEnv('SPONSOR_MONGODB_URI', MONGODB_URI);
 const SPONSOR_MONGODB_DB_NAME = parseStringEnv('SPONSOR_MONGODB_DB_NAME', MONGODB_DB_NAME);
 const SPONSOR_MONGODB_COLLECTION = parseStringEnv('SPONSOR_MONGODB_COLLECTION', 'minidb');
@@ -230,7 +235,7 @@ export const Config = {
     MONGODB_COUNTERS_COLLECTION: parseStringEnv('MONGODB_COUNTERS_COLLECTION', 'counters'),
     MONGO_WALLET_FLUSH_INTERVAL_MS: parseNumberEnv('MONGO_WALLET_FLUSH_INTERVAL_MS', 5000),
     ENABLE_MONGO_WALLET: parseBooleanEnv('ENABLE_MONGO_WALLET', Boolean(MONGODB_URI)),
-    ENABLE_MONGO_GAME_DATA: parseBooleanEnv('ENABLE_MONGO_GAME_DATA', false),
+    ENABLE_MONGO_GAME_DATA: parseBooleanEnv('ENABLE_MONGO_GAME_DATA', Boolean(MONGODB_URI)),
     SECRET: resolveRuntimeKeyHex(),
     DATA_DIR: resolveServerDataDir(),
     PUBLIC_BASE_URL,

@@ -1,5 +1,5 @@
 {
-  "clientUrl": "http://127.0.0.1/",
+  "clientUrl": "http://34.135.182.35/",
   "presenceUrl": "http://127.0.0.1/api/presence/discord-target",
   "joinUrl": "http://127.0.0.1/api/presence/discord-join",
   "playGameUrl": "https://theminesa.studio/dungeon-blitz-r",

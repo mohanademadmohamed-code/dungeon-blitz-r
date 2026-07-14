@@ -34,7 +34,16 @@ export class JsonAdapter implements IDatabase {
     }
 
     public static async initializeMongoGameData(): Promise<void> {
-        await JsonAdapter.mongoGameData?.connect();
+        if (!JsonAdapter.mongoGameData) {
+            console.log('[GameData] JSON account/save authority active (Mongo game data disabled)');
+            return;
+        }
+
+        await JsonAdapter.mongoGameData.connect();
+        console.log(
+            `[GameData] Mongo account/save authority active: db=${Config.MONGODB_DB_NAME} `
+            + `accounts=${Config.MONGODB_ACCOUNTS_COLLECTION} saves=${Config.MONGODB_SAVES_COLLECTION}`
+        );
     }
 
     public static async closeMongoGameData(): Promise<void> {
