@@ -19,11 +19,11 @@ module.exports = {
             time: true,
             env: {
                 NODE_ENV: 'production',
-                DUNGEON_BLITZ_BRANCH: 'multiplayer'
+                DUNGEON_BLITZ_BRANCH: 'main'
             },
             env_production: {
                 NODE_ENV: 'production',
-                DUNGEON_BLITZ_BRANCH: 'multiplayer'
+                DUNGEON_BLITZ_BRANCH: 'main'
             }
         }
     ]
