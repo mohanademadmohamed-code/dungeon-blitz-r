@@ -129,6 +129,37 @@ function testMonotonicSessionLateJoinAndLeaderExit(): { scope: string; member: F
     assert.equal(DungeonSession.requestRoomChange(leader as never, 4), 4);
     assert.equal(leaderState.transitionVersion, transitionVersion, 'duplicate room triggers must be idempotent');
     assert.equal(DungeonSession.requestRoomChange(leader as never, 2), 4, 'backward room transitions must be rejected');
+    const completedRoomsBeforeOversizedRequest = [...leaderState.completedRoomIds];
+    const startedRoomEventsBeforeOversizedRequest = leader.startedRoomEvents.size;
+    assert.equal(
+        DungeonSession.requestRoomChange(leader as never, 0xffffffff),
+        4,
+        'oversized packet room ids must keep the authoritative room unchanged'
+    );
+    assert.equal(leaderState.transitionVersion, transitionVersion, 'rejected oversized room ids must not advance the session version');
+    assert.deepEqual(
+        [...leaderState.completedRoomIds],
+        completedRoomsBeforeOversizedRequest,
+        'rejected oversized room ids must not expand completed-room bookkeeping'
+    );
+    assert.equal(
+        leader.startedRoomEvents.size,
+        startedRoomEventsBeforeOversizedRequest,
+        'rejected oversized room ids must not expand per-client room bookkeeping'
+    );
+    const oversizedRoomStateUpdate = new BitBuffer(false);
+    oversizedRoomStateUpdate.writeMethod9(0xffffffff);
+    oversizedRoomStateUpdate.writeMethod9(0);
+    const relayedPacketsBeforeOversizedUpdate = leader.sentPackets.length;
+    assert.doesNotThrow(
+        () => LevelHandler.handleRoomStateUpdate(leader as never, oversizedRoomStateUpdate.toBuffer()),
+        'an oversized 0xA9 room-state packet must be rejected without exhausting memory'
+    );
+    assert.equal(
+        leader.sentPackets.length,
+        relayedPacketsBeforeOversizedUpdate,
+        'an oversized 0xA9 room-state packet must not be relayed'
+    );
     assert.deepEqual([...leaderState.completedRoomIds], [0, 1, 2, 3]);
 
     DungeonSession.updateProgress(scope, 63);
@@ -148,6 +179,21 @@ function testMonotonicSessionLateJoinAndLeaderExit(): { scope: string; member: F
     assert.equal(reconnect.character.questTrackerState, 63, 'late join/reconnect must hydrate progress');
     assert.ok(reconnect.startedRoomEvents.has(`${LEVEL}:0`) && reconnect.startedRoomEvents.has(`${LEVEL}:4`));
     return { scope, member, reconnect };
+}
+
+function testOversizedInitialRoomIsRejected(): void {
+    const client = createClient(104, 0xffffffff);
+    client.levelInstanceId = `${INSTANCE}-oversized-initial-room`;
+    GlobalState.sessionsByToken.set(client.token, client as never);
+
+    const state = DungeonSession.getOrCreate(client as never);
+    assert.ok(state);
+    assert.equal(state.currentRoomId, 0, 'an oversized initial room id must fall back to the dungeon entry room');
+    assert.deepEqual(
+        [...client.startedRoomEvents],
+        [`${LEVEL}:0`],
+        'oversized initial room ids must not expand room-event bookkeeping'
+    );
 }
 
 function testServerAiAndSnapshot(scope: string, member: FakeClient, reconnect: FakeClient): void {
@@ -300,6 +346,8 @@ function main(): void {
     testExtractedRoster();
     const { scope, member, reconnect } = testMonotonicSessionLateJoinAndLeaderExit();
     testServerAiAndSnapshot(scope, member, reconnect);
+    resetState();
+    testOversizedInitialRoomIsRejected();
     resetState();
     testJoiningPlayerCanReleaseBossIntro();
     resetState();

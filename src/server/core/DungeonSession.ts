@@ -58,8 +58,8 @@ export interface DungeonStateSnapshot {
     entityVersion: number;
 }
 
-const DEFINITIONS = new Map<string, { serverAi: boolean; monotonicRooms: boolean }>([
-    ['TutorialDungeon', { serverAi: true, monotonicRooms: true }]
+const DEFINITIONS = new Map<string, { serverAi: boolean; monotonicRooms: boolean; maxRoomId: number }>([
+    ['TutorialDungeon', { serverAi: true, monotonicRooms: true, maxRoomId: 9 }]
 ]);
 
 const lastLogByKey = new Map<string, number>();
@@ -87,9 +87,11 @@ function getAnimation(entity: any): string {
 function logSessionEvent(event: string, state: AuthoritativeDungeonSessionState, details: Record<string, unknown> = {}): void {
     const entityId = Math.max(0, Math.round(Number(details.entityId ?? 0)));
     const roomId = normalizeRoomId(details.roomId ?? state.currentRoomId);
-    const key = `${event}:${state.levelScope}:${roomId}:${entityId}`;
+    const resultKey = details.result === 'rejected_out_of_range' ? ':rejected_out_of_range' : '';
+    const key = `${event}:${state.levelScope}:${roomId}:${entityId}${resultKey}`;
     const now = Date.now();
-    if (event === 'enemy:stateUpdated' && now - Number(lastLogByKey.get(key) ?? 0) < 5000) return;
+    const shouldRateLimit = event === 'enemy:stateUpdated' || details.result === 'rejected_out_of_range';
+    if (shouldRateLimit && now - Number(lastLogByKey.get(key) ?? 0) < 5000) return;
     lastLogByKey.set(key, now);
     const suffix = Object.entries(details)
         .filter(([name]) => name !== 'roomId' && name !== 'entityId')
@@ -119,12 +121,16 @@ export class DungeonSession {
     static getOrCreate(client: Client): AuthoritativeDungeonSessionState | null {
         const levelScope = getClientLevelScope(client);
         const dungeonId = LevelConfig.normalizeLevelName(client.currentLevel);
-        if (!levelScope || !DungeonSession.isAuthoritativeLevel(dungeonId)) return null;
+        const definition = DEFINITIONS.get(dungeonId);
+        if (!levelScope || !definition) return null;
 
         let state = GlobalState.dungeonSessions.get(levelScope);
         let created = false;
         if (!state) {
-            const initialRoom = Math.max(0, normalizeRoomId(client.currentRoomId));
+            const requestedInitialRoom = normalizeRoomId(client.currentRoomId);
+            const initialRoom = requestedInitialRoom >= 0 && requestedInitialRoom <= definition.maxRoomId
+                ? requestedInitialRoom
+                : 0;
             state = {
                 dungeonSessionId: String(client.levelInstanceId || levelScope),
                 dungeonId,
@@ -185,6 +191,18 @@ export class DungeonSession {
         const requested = normalizeRoomId(requestedRoomId);
         if (!state || requested < 0) return requested;
         const previous = state.currentRoomId;
+        const maxRoomId = DEFINITIONS.get(state.dungeonId)?.maxRoomId ?? previous;
+        if (requested > maxRoomId) {
+            logSessionEvent('dungeon:roomChanged', state, {
+                roomId: previous,
+                requestedRoomId: requested,
+                maxRoomId,
+                result: 'rejected_out_of_range',
+                authoritativeRoomId: previous
+            });
+            client.currentRoomId = previous;
+            return previous;
+        }
         if (requested < previous) {
             logSessionEvent('dungeon:roomChanged', state, { roomId: requested, result: 'rejected_backward', authoritativeRoomId: previous });
             client.currentRoomId = previous;
