@@ -226,6 +226,9 @@ export class EntityHandler {
         client: Client,
         levelMap: Map<number, any>
     ): void {
+        if (!EntityHandler.hasServerSpawnedHostiles(levelName)) {
+            return;
+        }
         const config = EntityHandler.getDungeonSpawnConfigForLog(levelName);
         if (!config) {
             return;
@@ -2841,6 +2844,18 @@ export class EntityHandler {
             return false;
         }
 
+        // This bridge exists for another party member's equivalent Flash
+        // spawn. The same client can legitimately create several actors with
+        // the same type during sequential waves; folding those new local ids
+        // back onto its earlier actor makes every later wave share one HP/death
+        // state and disappear as soon as the first actor dies.
+        if (
+            localId !== canonicalId &&
+            Math.max(0, Math.round(Number(canonical?.ownerToken ?? 0))) === client.token
+        ) {
+            return false;
+        }
+
         if (localId !== canonicalId) {
             EntityHandler.rememberEntityAlias(client, localId, canonicalId);
             client.knownEntityIds.delete(localId);
@@ -2912,9 +2927,11 @@ export class EntityHandler {
             if (!EntityHandler.isSharedClientSpawnRegionActor(levelName, candidate)) {
                 continue;
             }
-            const candidateId = Math.max(0, Math.round(Number(candidate?.id ?? 0)));
-            const entityId = Math.max(0, Math.round(Number(entity?.id ?? 0)));
-            if (Number(candidate?.ownerToken ?? 0) === excludedOwnerToken && candidateId === entityId) {
+            // Canonical matching is for another participant's representation
+            // of the same Flash actor. Never use an entity already owned by
+            // this sender as the match for a new local id; scripted waves can
+            // repeatedly spawn the same type from one client.
+            if (Number(candidate?.ownerToken ?? 0) === excludedOwnerToken) {
                 continue;
             }
             if (partyId > 0) {
@@ -4617,8 +4634,15 @@ export class EntityHandler {
             if (EntityHandler.usesClientSpawn(levelName)) {
                 console.log(`[EntityHandler] Skipping server NPC init for client-spawn level ${levelName}`);
             } else {
-                const npcs = NpcLoader.getNpcsForLevel(levelName);
-                const dungeonSpawnConfig = EntityHandler.getDungeonSpawnConfigForLog(levelName);
+                const serverAuthorityHostiles = EntityHandler.hasServerSpawnedHostiles(levelName);
+                const npcs = NpcLoader.getNpcsForLevel(levelName).filter((npc) =>
+                    serverAuthorityHostiles ||
+                    Number(npc?.team ?? 0) !== EntityTeam.ENEMY ||
+                    !Boolean(npc?.serverSpawned ?? npc?.serverSpawn)
+                );
+                const dungeonSpawnConfig = serverAuthorityHostiles
+                    ? EntityHandler.getDungeonSpawnConfigForLog(levelName)
+                    : null;
                 if (dungeonSpawnConfig) {
                     console.log(
                         `[DungeonSpawnServer] init level=${dungeonSpawnConfig.levelId || dungeonSpawnConfig.levelName} levelName=${dungeonSpawnConfig.levelName} dungeon="${dungeonSpawnConfig.dungeonName}" scope=${getLevelScopeKey(levelName, client.levelInstanceId)} enemies=${dungeonSpawnConfig.enemies.length} requiredForClear=${dungeonSpawnConfig.enemies.filter((enemy) => enemy.requiredForClear).length}`
@@ -4630,7 +4654,9 @@ export class EntityHandler {
                     if (Config.DISABLE_ALL_ENEMIES && EntityHandler.isEnemyEntity(npc)) {
                         continue;
                     }
-                    const entityProps = EntityHandler.usesServerAuthorityHostiles(levelName) || Boolean(npc?.serverSpawned)
+                    const entityProps = serverAuthorityHostiles && (
+                        EntityHandler.usesServerAuthorityHostiles(levelName) || Boolean(npc?.serverSpawned)
+                    )
                         ? EntityHandler.createServerAuthorityEntityFromNpc(client, levelName, npc)
                         : {
                             ...Entity.fromNpc(npc),

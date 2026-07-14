@@ -246,6 +246,18 @@ function testOrdinaryDungeonBossesStayClientOwned(): void {
         GlobalState.sessionsByToken.set(client.token, client as never);
         EntityHandler.sendInitialLevelEntities(client as never, entry.levelName);
 
+        const levelMap = GlobalState.levelEntities.get(getLevelScopeKey(entry.levelName, client.levelInstanceId));
+        const prematureServerHostiles = Array.from(levelMap?.values() ?? []).filter((entity) =>
+            !Boolean(entity?.isPlayer) &&
+            Number(entity?.team ?? 0) === EntityTeam.ENEMY &&
+            Boolean(entity?.serverSpawned ?? entity?.serverSpawn ?? entity?.generatedFromScript)
+        );
+        assert.equal(
+            prematureServerHostiles.length,
+            0,
+            `${entry.bossName} must not be server-spawned during initial level entry`
+        );
+
         const localBossId = entry.token + 7_000_000;
         EntityHandler.handleEntityFullUpdate(
             client as never,
@@ -256,6 +268,38 @@ function testOrdinaryDungeonBossesStayClientOwned(): void {
         assert.equal(Number(client.entities.get(localBossId)?.ownerToken), client.token, `${entry.bossName} must remain owned by the Flash client that spawned it`);
         assert.equal(Number(client.entities.get(localBossId)?.canonicalEntityId ?? 0), 0, `${entry.bossName} must not be replaced by a generated server proxy`);
     }
+}
+
+function testSameOwnerSequentialWaveSpawnsRemainDistinct(): void {
+    const client = createFakeClient('TutorialBoat', 'same-owner-wave-spawns', 56009);
+    client.currentRoomId = 2333678904;
+    attachPlayer(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+    GlobalState.partyGroups.set(client.token, {
+        id: client.token,
+        leader: client.character.name,
+        members: [client.character.name],
+        locked: false
+    });
+    GlobalState.partyByMember.set(client.character.name.toLowerCase(), client.token);
+    EntityHandler.sendInitialLevelEntities(client as never, client.currentLevel);
+
+    const firstId = 7_700_101;
+    const secondId = 7_700_102;
+    EntityHandler.handleEntityFullUpdate(
+        client as never,
+        buildHostileFullUpdate(firstId, 'IntroGoblinDagger', 6100, 620, client.currentRoomId)
+    );
+    EntityHandler.handleEntityFullUpdate(
+        client as never,
+        buildHostileFullUpdate(secondId, 'IntroGoblinDagger', 6700, 620, client.currentRoomId)
+    );
+
+    const scope = getLevelScopeKey(client.currentLevel, client.levelInstanceId);
+    const levelMap = GlobalState.levelEntities.get(scope);
+    assert.equal(EntityHandler.resolveEntityAlias(client as never, firstId), firstId, 'first wave actor must keep its own canonical id');
+    assert.equal(EntityHandler.resolveEntityAlias(client as never, secondId), secondId, 'later same-owner wave actor must not alias to the first actor');
+    assert.ok(levelMap?.has(firstId) && levelMap.has(secondId), 'same-owner sequential wave actors must coexist with independent HP/death state');
 }
 
 async function testWolfsEndBossProxyAndRegularHostile(levelName: 'TutorialDungeon' | 'TutorialDungeonHard'): Promise<void> {
@@ -514,6 +558,12 @@ async function main(): Promise<void> {
         GlobalState.levelEntities.clear();
         GlobalState.sessionsByToken.clear();
         testOrdinaryDungeonBossesStayClientOwned();
+
+        GlobalState.levelEntities.clear();
+        GlobalState.sessionsByToken.clear();
+        GlobalState.partyByMember.clear();
+        GlobalState.partyGroups.clear();
+        testSameOwnerSequentialWaveSpawnsRemainDistinct();
 
         GlobalState.levelEntities.clear();
         GlobalState.sessionsByToken.clear();
