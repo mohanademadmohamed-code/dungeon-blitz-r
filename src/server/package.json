@@ -1,11 +1,11 @@
 {
   "name": "server",
-  "version": "1.8.1",
+  "version": "1.8.3",
   "description": "",
   "main": "index.js",
   "scripts": {
     "dev": "nodemon --watch main.ts --watch auth --watch core --watch database --watch handlers --watch integrations --watch network --watch utils --watch tools/runDevServer.js --ext ts,js --ignore dist --ignore test --ignore data/saves --exec \"node tools/runDevServer.js\"",
-    "multiplayer": "node tools/startMultiplayerServer.js",
+    "multiplayer": "node --env-file-if-exists=.env tools/startMultiplayerServer.js",
     "dev:discord-bridge": "ts-node tools/discordLocalBridge.ts discord-bridge.dev.config.json",
     "install:discord-social-sdk": "node tools/installDiscordSocialSdk.js",
     "start:multiplayer:game": "node tools/startMultiplayerServer.js",

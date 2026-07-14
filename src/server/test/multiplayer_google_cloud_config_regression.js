@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const packageJson = require('../package.json');
 const {
     GOOGLE_CLOUD_HOST,
     applyMultiplayerServerEnv
@@ -32,5 +33,10 @@ assert.equal(overrides.STATIC_PORT, '8088');
 assert.equal(overrides.GAME_PORT, '9090');
 assert.equal(overrides.POLICY_PORT, '8843');
 assert.equal(overrides.ENABLE_POLICY_SERVER, 'false');
+assert.match(
+    packageJson.scripts.multiplayer,
+    /--env-file-if-exists=\.env/,
+    'multiplayer startup must load src/server/.env before importing server config'
+);
 
 console.log('multiplayer_google_cloud_config_regression: ok');

@@ -12,8 +12,7 @@ function applyMultiplayerServerEnv(env = process.env) {
 
 function startMultiplayerServer() {
     require('../scripts/cleanup-dev-instance');
-    require('ts-node/register');
-    require('../core/loadEnv');
+    require('ts-node/register/transpile-only');
     applyMultiplayerServerEnv();
 
     require('../main.ts');
