@@ -297,7 +297,7 @@ export class GlobalState {
         }
 
         const socket = (session as unknown as { socket?: { destroyed?: boolean; readyState?: string } }).socket;
-        return !socket || (!socket.destroyed && socket.readyState === 'open');
+        return !socket || (!socket.destroyed && socket.readyState !== 'closed');
     }
 
     static getOpenClients(): Client[] {

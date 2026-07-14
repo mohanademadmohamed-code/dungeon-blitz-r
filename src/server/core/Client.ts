@@ -755,6 +755,7 @@ export class Client {
         const { GlobalState } = require('./GlobalState') as typeof import('./GlobalState');
         const addr = `${this.socket.remoteAddress}:${this.socket.remotePort}`;
         const snapshot = this.createSessionCleanupSnapshot();
+        GlobalState.clients.delete(this);
 
         if (snapshot.userId && this.character) {
             if (this.deferredCharacterSaveTimer) {

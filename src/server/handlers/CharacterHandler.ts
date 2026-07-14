@@ -241,7 +241,7 @@ export class CharacterHandler {
     }
 
     private static isSessionStale(session: Client): boolean {
-        return session.socket.destroyed || session.socket.readyState !== 'open';
+        return !GlobalState.isClientConnectionOpen(session);
     }
 
     private static purgeSameCharacterGhosts(activeClient: Client, userId: number, characterName: string): void {
@@ -978,7 +978,14 @@ export class CharacterHandler {
         await BuildingHandler.syncCompletionState(client);
         await ForgeHandler.syncCompletionState(client);
         console.log(`[CharacterSelect] Selected ${char.name}`);
-        
+
+        if (
+            client.account &&
+            await LoginHandler.replaceAndWarnActiveAccountIdentityConflicts(client, client.account, char.name)
+        ) {
+            return;
+        }
+
         CharacterHandler.sendEnterWorld(client, char);
     }
 
