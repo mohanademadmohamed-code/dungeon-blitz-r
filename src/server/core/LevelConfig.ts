@@ -319,6 +319,13 @@ export class LevelConfig {
         return this.LEVELS[levelName] || { swf: "", mapId: 0, baseId: 0, isDungeon: false, isHard: false };
     }
 
+    static getDungeonLevelNames(): string[] {
+        return Object.entries(this.LEVELS)
+            .filter(([levelName, spec]) => spec.isDungeon && !this.NON_DUNGEON_OVERRIDES.has(levelName))
+            .map(([levelName]) => levelName)
+            .sort();
+    }
+
     static has(levelName: string): boolean {
         return Boolean(levelName) && Boolean(this.LEVELS[levelName]);
     }

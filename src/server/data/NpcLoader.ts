@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { DungeonSpawnLoader } from './DungeonSpawnLoader';
+import { TutorialDungeonMechanics } from '../core/TutorialDungeonMechanics';
 
 export interface NpcDef {
     id: number;
@@ -86,6 +87,18 @@ export class NpcLoader {
         if (levelName === 'TutorialDungeon') {
             const bakedNpcs = new Set(['IntroParrot', 'IntroGoblinNPC', 'NPCAnna']);
             filtered = filtered.filter((npc) => !bakedNpcs.has(String(npc?.name ?? '')));
+            const knownIds = new Set(filtered.map((npc) => Number(npc?.id ?? 0)));
+            for (const npc of npcs) {
+                if (!TutorialDungeonMechanics.isCompletionBoss(levelName, npc)) {
+                    continue;
+                }
+                const id = Number(npc?.id ?? 0);
+                if (knownIds.has(id)) {
+                    continue;
+                }
+                filtered.push(TutorialDungeonMechanics.decorateNpc(levelName, npc));
+                knownIds.add(id);
+            }
         }
 
         return filtered;

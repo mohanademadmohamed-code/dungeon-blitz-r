@@ -653,29 +653,14 @@ export class RewardHandler {
             collected: false,
             collectedBy: 0
         };
-        CombatHandler.logLootSync('spawnLoot-callsite', {
-            caller,
-            viewer: client.character?.name ?? '',
-            token: client.token,
-            sourceEnemy: metadata.sourceEnemyCanonicalId,
-            reason
-        });
         const isServerAuthorityHostileLevel = EntityHandler.usesServerAuthorityHostiles(getScopeLevelName(levelScope));
         if (
             isServerAuthorityHostileLevel &&
             RewardHandler.isEnemyLootReason(reason) &&
             !RewardHandler.isCanonicalDeathLootContextValid(levelScope, metadata.sourceEnemyCanonicalId, metadata.sourceEnemyLootDropNonce)
         ) {
-            CombatHandler.logLootSync('legacy-loot-blocked', {
-                viewer: client.character?.name ?? '',
-                token: client.token,
-                scope: levelScope,
-                sourceEnemy: metadata.sourceEnemyCanonicalId,
-                reason: 'missing_canonical_death',
-                caller
-            });
             if (metadata.sourceEnemyCanonicalId === 0) {
-                console.error(`[LootSync][ERROR-sourceEnemy-zero-hostile-loot] ${RewardHandler.formatLootSyncFields({
+                console.error(`[RewardHandler][InvalidHostileLootContext] ${RewardHandler.formatLootSyncFields({
                     viewer: client.character?.name ?? '',
                     token: client.token,
                     scope: levelScope,
@@ -692,17 +677,6 @@ export class RewardHandler {
             sourceEntity.lootDrops = sourceEntity.lootDrops instanceof Map ? sourceEntity.lootDrops : new Map<number, LootDropServerMetadata>();
             sourceEntity.lootDrops.set(lootId, metadata);
         }
-        CombatHandler.logLootSync('loot-spawn-out', {
-            viewer: client.character?.name ?? '',
-            token: client.token,
-            lootdropId: lootId,
-            nonce: metadata.lootDropNonce,
-            sourceEnemy: metadata.sourceEnemyCanonicalId,
-            amount: metadata.amount,
-            type,
-            reason,
-            caller
-        });
         client.send(0x32, RewardHandler.buildLootdrop(lootId, x + offsetX, y + offsetY, reward));
     }
 
@@ -817,15 +791,9 @@ export class RewardHandler {
         const isChainsEnemy = entName.startsWith('Chains');
         const isLargeEnemy = entRank === 'Lieutenant' || entRank === 'MiniBoss' || entRank === 'Boss';
         const allowItemDrop = !isChainsEnemy && (!isIntroEnemy || isLargeEnemy);
-        const rewardClass = String(entType?.RewardClass ?? '');
         const shouldApplyDropTables = isDungeonEnemyReward &&
             allowItemDrop &&
             itemLootAllowedByClass;
-        const baseMaterialChance = RewardHandler.MATERIAL_DROP_CHANCE_BY_RANK[entRank] ?? RewardHandler.MATERIAL_DROP_CHANCE_BY_RANK.Minion;
-        const packetMaterialMultiplier = RewardHandler.sanitizeDropMultiplier(reward.gearMultiplier);
-        const packetItemMultiplier = RewardHandler.sanitizeDropMultiplier(reward.itemMultiplier);
-        const materialFindRate = petBonuses.craftFind + charmBonuses.craftFind + potionBonuses.craftFind;
-        const itemFindRate = petBonuses.itemFind + charmBonuses.itemFind + potionBonuses.itemFind;
         const goldFindRate = petBonuses.goldFind + charmBonuses.goldFind + gearGoldFind + potionBonuses.goldFind;
         const shouldRollMaterial = shouldApplyDropTables && Boolean(realm);
         const shouldRollGear = shouldApplyDropTables;
@@ -849,150 +817,27 @@ export class RewardHandler {
             };
 
         // Küçük Intro düşmanlar (Minion rank) ve Chains entitylerinden eşya düşmez
-        let materialRoll: number | null = null;
-        let materialRarity: 'M' | 'R' | 'L' | null = null;
-        let materialRarityRoll: number | null = null;
-        let materialRarityWeights = RewardHandler.getMaterialRarityWeights(client);
-        if (realm && materialChance > 0) {
-            materialRoll = Math.random();
-            if (materialRoll < materialChance) {
-                const rarityResult = RewardHandler.resolveMaterialDropRarityDebug(client);
-                materialRarity = rarityResult.rarity;
-                materialRarityRoll = rarityResult.rarityRoll;
-                materialRarityWeights = rarityResult.rarityWeights;
-                materialId = GameData.getRandomMaterialForRealm(realm, [materialRarity]);
-            }
+        if (realm && materialChance > 0 && Math.random() < materialChance) {
+            const rarityResult = RewardHandler.resolveMaterialDropRarityDebug(client);
+            materialId = GameData.getRandomMaterialForRealm(realm, [rarityResult.rarity]);
         }
         if (allowItemDrop && dyeDebug.rarity) {
             dyeId = GameData.getRandomDyeId([dyeDebug.rarity], RewardHandler.collectOwnedDyeIds(client));
         }
-        let gearRoll: number | null = null;
-        let gearTierRoll: number | null = null;
-        let gearTierWeights = RewardHandler.getGearTierWeights(client, entRank);
-        if (allowItemDrop && gearChance > 0) {
-            gearRoll = Math.random();
-            if (gearRoll < gearChance) {
-                const tierResult = RewardHandler.resolveGearTierDebug(client, entRank);
-                gearTier = tierResult.tier;
-                gearTierRoll = tierResult.tierRoll;
-                gearTierWeights = tierResult.tierWeights;
-                gearId = GameData.getGearIdForEntity(
-                    entName,
-                    playerClass,
-                    undefined,
-                    client.currentLevel,
-                    gearTier,
-                    ownedGearTierKeys
-                );
-            }
-        }
-        let goldBeforeFind = gold;
-        let goldAfterFind = gold;
-        let goldFindApplied = false;
-        if (gold > 0 && goldFindRate > 0) {
-            goldFindApplied = true;
-            goldAfterFind = Math.max(0, Math.round(gold * (1 + goldFindRate)));
-            gold = goldAfterFind;
-        }
-
-        const xpDebug = RewardHandler.resolveXpRewardDebug(client, exp, reward.exp);
-        const shouldLogRewardRoll = shouldRollMaterial || shouldRollGear || dyeDebug.eligible || packetGold > 0 || goldFindRate > 0 || xpDebug.attempted;
-        if (Config.REWARD_ROLL_DEBUG && shouldLogRewardRoll) {
-            console.log('[RewardRollDebug]', {
-                character: client.character?.name ?? '',
-                level: client.currentLevel,
-                sourceId: reward.sourceId,
-                receiverId: reward.receiverId,
+        if (allowItemDrop && gearChance > 0 && Math.random() < gearChance) {
+            const tierResult = RewardHandler.resolveGearTierDebug(client, entRank);
+            gearTier = tierResult.tier;
+            gearId = GameData.getGearIdForEntity(
                 entName,
-                entRank,
-                rewardClass,
                 playerClass,
-                realm,
-                allowItemDrop,
-                itemLootAllowedByClass,
-                rolls: {
-                    material: {
-                        attempted: shouldRollMaterial,
-                        baseChance: baseMaterialChance,
-                        packetMultiplier: packetMaterialMultiplier,
-                        petFind: petBonuses.craftFind,
-                        charmFind: charmBonuses.craftFind,
-                        potionFind: potionBonuses.craftFind,
-                        totalFindRate: materialFindRate,
-                        finalMultiplier: packetMaterialMultiplier,
-                        finalChance: materialChance,
-                        dropRoll: materialRoll,
-                        dropped: materialId > 0,
-                        rarityWeights: materialRarityWeights,
-                        rarityTotalChances: RewardHandler.buildRarityTotalChances(materialChance, materialRarityWeights),
-                        rarityRoll: materialRarityRoll,
-                        rarity: materialRarity,
-                        materialId
-                    },
-                    gear: {
-                        attempted: shouldRollGear,
-                        baseChance: Number(entType?.ItemDropChance ?? 0),
-                        packetMultiplier: packetItemMultiplier,
-                        packetRawMultiplier: reward.itemMultiplier,
-                        packetDropItem: reward.dropItem,
-                        packetDropGear: reward.dropGear,
-                        packetDropMaterial: reward.dropMaterial,
-                        petFind: petBonuses.itemFind,
-                        charmFind: charmBonuses.itemFind,
-                        potionFind: potionBonuses.itemFind,
-                        totalFindRate: itemFindRate,
-                        finalMultiplier: packetItemMultiplier,
-                        finalChance: gearChance,
-                        dropRoll: gearRoll,
-                        dropped: gearId > 0,
-                        rarityWeights: gearTierWeights,
-                        rarityTotalChances: RewardHandler.buildTierTotalChances(gearChance, gearTierWeights),
-                        rarityRoll: gearTierRoll,
-                        tier: gearId > 0 ? gearTier : null,
-                        rolledTier: gearTierRoll !== null ? gearTier : null,
-                        gearId
-                    },
-                    dye: {
-                        attempted: dyeDebug.eligible,
-                        baseChance: dyeDebug.baseChance,
-                        finalChance: dyeDebug.finalChance,
-                        rankEligible: dyeDebug.eligible,
-                        affectedByFind: false,
-                        blockedByItemDropRules: dyeDebug.dropped && !allowItemDrop,
-                        dropRoll: dyeDebug.dropRoll,
-                        dropped: dyeId > 0,
-                        rarityWeights: dyeDebug.rarityWeights,
-                        rarityTotalChances: RewardHandler.buildRarityTotalChances(dyeDebug.finalChance, dyeDebug.rarityWeights),
-                        rarityRoll: dyeDebug.rarityRoll,
-                        rarity: dyeId > 0 ? dyeDebug.rarity : null,
-                        rolledRarityBeforeItemDropRules: dyeDebug.rarity,
-                        dyeId
-                    },
-                    gold: {
-                        attempted: packetGold > 0,
-                        packetGold,
-                        baseGold: goldBeforeFind,
-                        petFind: petBonuses.goldFind,
-                        charmFind: charmBonuses.goldFind,
-                        gearFind: gearGoldFind,
-                        potionFind: potionBonuses.goldFind,
-                        totalFindRate: goldFindRate,
-                        multiplier: 1 + goldFindRate,
-                        findApplied: goldFindApplied,
-                        finalGold: goldAfterFind
-                    },
-                    exp: {
-                        attempted: xpDebug.attempted,
-                        packetExp: xpDebug.packetExp,
-                        baseExp: xpDebug.baseExp,
-                        petBonus: xpDebug.petBonus,
-                        potionBonus: xpDebug.potionBonus,
-                        totalBonusRate: xpDebug.totalBonusRate,
-                        multiplier: xpDebug.multiplier,
-                        finalExp: xpDebug.finalExp
-                    }
-                }
-            });
+                undefined,
+                client.currentLevel,
+                gearTier,
+                ownedGearTierKeys
+            );
+        }
+        if (gold > 0 && goldFindRate > 0) {
+            gold = Math.max(0, Math.round(gold * (1 + goldFindRate)));
         }
 
         const needsFallback = gold <= 0 && !shouldRollGear && !shouldRollMaterial;
@@ -1112,13 +957,6 @@ export class RewardHandler {
         const rewardKey = `${getClientLevelScope(client)}:${reward.sourceId}:${rewardNonce}`;
         if (client.processedRewardSources.has(rewardKey)) {
             if (context.sourceLootDropNonce) {
-                CombatHandler.logLootSync('loot-grant-skip', {
-                    canonicalId: context.sourceEnemyCanonicalId ?? reward.sourceId,
-                    nonce: context.sourceLootDropNonce,
-                    viewer: client.character?.name ?? '',
-                    token: client.token,
-                    reason: 'already_processed'
-                });
             }
             return false;
         }
@@ -1128,15 +966,6 @@ export class RewardHandler {
         const reason = context.reason ?? 'unknown';
         const caller = context.caller ?? 'unknown';
         if (context.sourceLootDropNonce) {
-            CombatHandler.logLootSync('loot-grant', {
-                canonicalId: context.sourceEnemyCanonicalId ?? reward.sourceId,
-                nonce: context.sourceLootDropNonce,
-                viewer: client.character?.name ?? '',
-                token: client.token,
-                amount: resolved.gold,
-                reason,
-                caller
-            });
         }
         const shouldSave = RewardHandler.applyXpReward(client, resolved.exp);
 
@@ -1230,27 +1059,6 @@ export class RewardHandler {
             EntityHandler.usesServerAuthorityHostiles(client.currentLevel) &&
             reason === 'legacy_enemy_reward'
         ) {
-            CombatHandler.logLootSync('spawnLoot-callsite', {
-                caller,
-                viewer: client.character?.name ?? '',
-                token: client.token,
-                sourceEnemy: 0,
-                reason
-            });
-            CombatHandler.logLootSync('enemy-reward-blocked-no-canonical-context', {
-                viewer: client.character?.name ?? '',
-                token: client.token,
-                scope: levelScope,
-                caller
-            });
-            CombatHandler.logLootSync('legacy-loot-blocked', {
-                viewer: client.character?.name ?? '',
-                token: client.token,
-                scope: levelScope,
-                sourceEnemy: 0,
-                reason: 'missing_canonical_death',
-                caller
-            });
             return;
         }
 
@@ -1320,12 +1128,6 @@ export class RewardHandler {
                 !RewardHandler.isCanonicalDeathLootContextValid(levelScope, sourceEnemyCanonicalId, sourceLootDropNonce)
             )
         ) {
-            CombatHandler.logLootSync('enemy-reward-blocked-no-canonical-context', {
-                viewer: client.character?.name ?? '',
-                token: client.token,
-                scope: levelScope,
-                caller
-            });
             return;
         }
         const entType = GameData.getEntType(entName) ?? {};
@@ -1363,13 +1165,6 @@ export class RewardHandler {
                 continue;
             }
             if (sourceEntity.lootGrantedTokens.has(recipient.token)) {
-                CombatHandler.logLootSync('loot-grant-skip', {
-                    canonicalId: sourceId,
-                    nonce: sourceLootDropNonce,
-                    viewer: recipient.character?.name ?? '',
-                    token: recipient.token,
-                    reason: 'already_granted'
-                });
                 continue;
             }
 
@@ -1400,12 +1195,6 @@ export class RewardHandler {
         const metadata = reward.__lootDropMetadata;
         if (metadata) {
             if (metadata.ownerToken > 0 && metadata.ownerToken !== client.token) {
-                CombatHandler.logLootSync('pickup-duplicate-drop', {
-                    lootdropId: lootId,
-                    nonce: metadata.lootDropNonce,
-                    token: client.token,
-                    reason: 'owner_mismatch'
-                });
                 client.pendingLoot.delete(lootId);
                 return;
             }
@@ -1418,12 +1207,6 @@ export class RewardHandler {
                 ? `${metadata.lootDropNonce}:${client.token}`
                 : metadata.lootDropNonce;
             if (metadata.collected || collectedTokens.has(collectKey)) {
-                CombatHandler.logLootSync('pickup-duplicate-drop', {
-                    lootdropId: lootId,
-                    nonce: metadata.lootDropNonce,
-                    token: client.token,
-                    reason: 'already_collected'
-                });
                 client.pendingLoot.delete(lootId);
                 return;
             }
@@ -1434,21 +1217,7 @@ export class RewardHandler {
             if (sourceEntity && typeof sourceEntity === 'object') {
                 sourceEntity.lootCollectedTokens = collectedTokens;
             }
-            CombatHandler.logLootSync('pickup', {
-                lootdropId: lootId,
-                nonce: metadata.lootDropNonce,
-                token: client.token,
-                amount: metadata.amount,
-                reason: metadata.reason,
-                caller: metadata.caller
-            });
         } else {
-            CombatHandler.logLootSync('pickup', {
-                lootdropId: lootId,
-                nonce: '',
-                token: client.token,
-                amount: RewardHandler.getRewardAmount(reward)
-            });
         }
 
         client.pendingLoot.delete(lootId);

@@ -1,5 +1,6 @@
 import { Character, UserAccount } from '../database/Database';
 import { Client } from './Client';
+import type { DungeonCompletionRunState } from './DungeonCompletionTypes';
 import { normalizeCharacterKey, PartyGroup, PendingTeleport } from './SocialState';
 
 export interface PendingTransfer {
@@ -34,7 +35,6 @@ export interface PendingTransfer {
 export type SharedDungeonProgressState = {
     progress: number;
     authorityToken: number;
-    completionRequested?: boolean;
     trackedHostileIds?: Set<number>;
     defeatedHostileIds?: Set<number>;
     liveStatsByCharacter?: Map<string, {
@@ -132,6 +132,8 @@ export class GlobalState {
     // Level scope key -> Map<EntityId, EntityData>
     static levelEntities: Map<string, Map<number, any>> = new Map();
     static levelQuestProgress: Map<string, SharedDungeonProgressState> = new Map();
+    // Level scope -> the single authoritative completion state for that dungeon run.
+    static dungeonCompletions: Map<string, DungeonCompletionRunState> = new Map();
     static dungeonCutscenes: Map<string, SharedDungeonCutsceneState> = new Map();
     static deadServerAuthorityHostilesByScope: Map<string, Map<string, DeadHostileTombstone>> = new Map();
     static combatContributions: Map<string, Map<string, number>> = new Map();
@@ -295,7 +297,7 @@ export class GlobalState {
         }
 
         const socket = (session as unknown as { socket?: { destroyed?: boolean; readyState?: string } }).socket;
-        return !socket || (!socket.destroyed && socket.readyState === 'open');
+        return !socket || (!socket.destroyed && socket.readyState !== 'closed');
     }
 
     static getOpenClients(): Client[] {

@@ -74,15 +74,6 @@ export class ForgeHandler {
         return Math.floor(Date.now() / 1000);
     }
 
-    private static logForgeEvent(event: string, client: Client, details: Record<string, unknown> = {}): void {
-        console.log('[ForgeHandler]', event, {
-            userId: client.userId ?? null,
-            character: client.character?.name ?? null,
-            level: client.currentLevel ?? client.character?.CurrentLevel?.name ?? null,
-            ...details
-        });
-    }
-
     private static getCompletionTimerKey(userId: number | null, characterName: string | null | undefined): string {
         return `${Number(userId ?? 0)}:${String(characterName ?? '').trim().toLowerCase()}`;
     }
@@ -486,7 +477,7 @@ export class ForgeHandler {
         forgeState.forge_roll_b = ForgeHandler.randomRollSeed();
     }
 
-    private static enforceActiveRespecStoneDuration(client: Client, forgeState: ForgeState, context: string): boolean {
+    private static enforceActiveRespecStoneDuration(client: Client, forgeState: ForgeState): boolean {
         if (Number(forgeState.primary ?? 0) !== CharmID.RespecStone) {
             return false;
         }
@@ -522,17 +513,10 @@ export class ForgeHandler {
         forgeState.respec_duration_seconds = targetDuration;
         forgeState.ReadyTime = now + targetDuration;
 
-        ForgeHandler.logForgeEvent('respec-duration-forced', client, {
-            context,
-            oldReadyTime: readyTime,
-            newReadyTime: forgeState.ReadyTime,
-            oldRemainingSeconds,
-            forcedDurationSeconds: targetDuration
-        });
         return true;
     }
 
-    private static enforceActiveCharmRemoverDuration(client: Client, forgeState: ForgeState, context: string): boolean {
+    private static enforceActiveCharmRemoverDuration(forgeState: ForgeState): boolean {
         if (Number(forgeState.primary ?? 0) !== CharmID.CharmRemover) {
             return false;
         }
@@ -549,13 +533,6 @@ export class ForgeHandler {
         }
 
         forgeState.ReadyTime = now + ForgeHandler.CHARM_REMOVER_DURATION_SECONDS;
-        ForgeHandler.logForgeEvent('charm-remover-duration-forced', client, {
-            context,
-            oldReadyTime: readyTime,
-            newReadyTime: forgeState.ReadyTime,
-            oldRemainingSeconds: remainingSeconds,
-            forcedDurationSeconds: ForgeHandler.CHARM_REMOVER_DURATION_SECONDS
-        });
         return true;
     }
 
@@ -567,8 +544,8 @@ export class ForgeHandler {
         ForgeHandler.clearCompletionTimer(client.userId, client.character.name);
 
         const initialForgeState = ForgeHandler.ensureForgeState(client.character);
-        const didForceRespecDuration = ForgeHandler.enforceActiveRespecStoneDuration(client, initialForgeState, 'sync');
-        const didForceCharmRemoverDuration = ForgeHandler.enforceActiveCharmRemoverDuration(client, initialForgeState, 'sync');
+        const didForceRespecDuration = ForgeHandler.enforceActiveRespecStoneDuration(client, initialForgeState);
+        const didForceCharmRemoverDuration = ForgeHandler.enforceActiveCharmRemoverDuration(initialForgeState);
 
         const didFinalizeExpiredForge = ForgeHandler.finalizeCompletedForgeIfNeeded(client.character);
         if (didForceRespecDuration || didForceCharmRemoverDuration || didFinalizeExpiredForge) {
@@ -727,16 +704,6 @@ export class ForgeHandler {
             delete forgeState.respec_duration_seconds;
         }
 
-        ForgeHandler.logForgeEvent('start-forge', client, {
-            primary,
-            isRespecStone: primary === CharmID.RespecStone,
-            durationSeconds,
-            readyTime,
-            remainingSeconds: readyTime - ForgeHandler.getNowSeconds(),
-            isExtendedForge,
-            freeSpeedupReason: forgeState.free_speedup_reason || ''
-        });
-
         await ForgeHandler.saveCharacter(client);
         await ForgeHandler.syncCompletionState(client);
     }
@@ -749,21 +716,13 @@ export class ForgeHandler {
         const br = new BitReader(data);
         const idolCost = br.readMethod9();
         const forgeState = ForgeHandler.ensureForgeState(client.character);
-        const didForceRespecDuration = ForgeHandler.enforceActiveRespecStoneDuration(client, forgeState, 'speedup');
-        const didForceCharmRemoverDuration = ForgeHandler.enforceActiveCharmRemoverDuration(client, forgeState, 'speedup');
+        const didForceRespecDuration = ForgeHandler.enforceActiveRespecStoneDuration(client, forgeState);
+        const didForceCharmRemoverDuration = ForgeHandler.enforceActiveCharmRemoverDuration(forgeState);
         if (didForceRespecDuration || didForceCharmRemoverDuration) {
             await ForgeHandler.saveCharacter(client);
         }
 
-        ForgeHandler.logForgeEvent('speedup-received', client, {
-            primary: Number(forgeState.primary ?? 0),
-            idolCost,
-            readyTime: Number(forgeState.ReadyTime ?? 0),
-            remainingSeconds: Number(forgeState.ReadyTime ?? 0) - ForgeHandler.getNowSeconds()
-        });
-
         if (Number(forgeState.primary ?? 0) <= 0) {
-            ForgeHandler.logForgeEvent('speedup-ignored-empty-forge', client, { idolCost });
             return;
         }
 
@@ -781,24 +740,9 @@ export class ForgeHandler {
             ? ForgeHandler.getAuthoritativeSpeedupCost(forgeState)
             : idolCost;
 
-        if (isRespecStone) {
-            ForgeHandler.logForgeEvent('speedup-respec-authoritative-cost', client, {
-                clientIdolCost: idolCost,
-                authoritativeCost,
-                readyTime: Number(forgeState.ReadyTime ?? 0),
-                remainingSeconds: Number(forgeState.ReadyTime ?? 0) - ForgeHandler.getNowSeconds()
-            });
-        }
-
         if (authoritativeCost <= 0) {
             const freeSpeedupReason = ForgeHandler.getSpecialFreeSpeedupReason(client, forgeState);
             if (!isRespecStone && !freeSpeedupReason && !ForgeHandler.canUseFreeSpeedupWindow(forgeState)) {
-                ForgeHandler.logForgeEvent('speedup-blocked-free-window', client, {
-                    idolCost,
-                    primary,
-                    readyTime: Number(forgeState.ReadyTime ?? 0),
-                    remainingSeconds: Number(forgeState.ReadyTime ?? 0) - ForgeHandler.getNowSeconds()
-                });
                 return;
             }
 
@@ -810,22 +754,11 @@ export class ForgeHandler {
             ForgeHandler.markCompletedForgeMilestones(client.character, forgeState);
             ForgeHandler.completeActiveForgeNow(forgeState);
             await ForgeHandler.saveCharacter(client);
-            ForgeHandler.logForgeEvent('speedup-completed', client, {
-                primary,
-                clientIdolCost: idolCost,
-                chargedIdols: 0,
-                mammothIdols: Number(client.character.mammothIdols ?? 0)
-            });
             ForgeHandler.sendForgeResultPacket(client, forgeState);
             return;
         }
 
         if (Number(client.character.mammothIdols ?? 0) < authoritativeCost) {
-            ForgeHandler.logForgeEvent('speedup-blocked-idols', client, {
-                clientIdolCost: idolCost,
-                authoritativeCost,
-                mammothIdols: Number(client.character.mammothIdols ?? 0)
-            });
             return;
         }
 
@@ -837,12 +770,6 @@ export class ForgeHandler {
         ForgeHandler.completeActiveForgeNow(forgeState);
 
         await ForgeHandler.saveCharacter(client);
-        ForgeHandler.logForgeEvent('speedup-completed', client, {
-            primary,
-            clientIdolCost: idolCost,
-            chargedIdols: authoritativeCost,
-            mammothIdols: Number(client.character.mammothIdols ?? 0)
-        });
         ForgeHandler.sendForgeResultPacket(client, forgeState);
     }
 
@@ -852,8 +779,8 @@ export class ForgeHandler {
         }
 
         const forgeState = ForgeHandler.ensureForgeState(client.character);
-        const didForceRespecDuration = ForgeHandler.enforceActiveRespecStoneDuration(client, forgeState, 'collect');
-        const didForceCharmRemoverDuration = ForgeHandler.enforceActiveCharmRemoverDuration(client, forgeState, 'collect');
+        const didForceRespecDuration = ForgeHandler.enforceActiveRespecStoneDuration(client, forgeState);
+        const didForceCharmRemoverDuration = ForgeHandler.enforceActiveCharmRemoverDuration(forgeState);
         if (didForceRespecDuration || didForceCharmRemoverDuration) {
             await ForgeHandler.saveCharacter(client);
         }

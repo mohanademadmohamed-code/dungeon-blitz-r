@@ -1,0 +1,230 @@
+import rawConditions from '../data/dungeon_completion_conditions.json';
+import { LevelConfig } from './LevelConfig';
+import type {
+    DungeonCompletionCondition,
+    DungeonCompletionEntityObjective,
+    DungeonCompletionMode
+} from './DungeonCompletionTypes';
+
+type RawCatalog = {
+    schemaVersion?: unknown;
+    levels?: Record<string, DungeonCompletionCondition>;
+};
+
+const catalog = rawConditions as RawCatalog;
+const VALID_MODES = new Set<DungeonCompletionMode>(['bosses', 'full-clear', 'client-signal', 'disabled']);
+const VALID_PARTY_HOSTILE_SYNC_POLICIES = new Set(['all', 'bosses-only']);
+
+function normalizeIdentity(value: unknown): string {
+    return String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+}
+
+function getEntityNames(entity: any): string[] {
+    const names = new Set<string>();
+    for (const value of [
+        entity?.name,
+        entity?.EntName,
+        entity?.entName,
+        entity?.characterName,
+        entity?.character_name,
+        entity?.roomBossName,
+        entity?.displayName,
+        entity?.DisplayName
+    ]) {
+        const name = String(value ?? '').replace(/^,+/, '').trim();
+        if (name) {
+            names.add(name);
+        }
+    }
+    return [...names];
+}
+
+function cloneObjective(objective: DungeonCompletionEntityObjective): DungeonCompletionEntityObjective {
+    return {
+        names: [...objective.names],
+        aliases: objective.aliases ? [...objective.aliases] : undefined,
+        role: objective.role
+    };
+}
+
+function cloneCondition(condition: DungeonCompletionCondition): DungeonCompletionCondition {
+    return {
+        ...condition,
+        bossGroups: condition.bossGroups?.map((group) => [...group]),
+        bossAliases: condition.bossAliases ? { ...condition.bossAliases } : undefined,
+        entityObjectives: condition.entityObjectives?.map(cloneObjective),
+        cutscene: condition.cutscene ? { ...condition.cutscene } : undefined,
+        clientAuthorityBosses: condition.clientAuthorityBosses ? [...condition.clientAuthorityBosses] : undefined
+    };
+}
+
+export class DungeonCompletionConditions {
+    static readonly SCHEMA_VERSION = 2;
+
+    static get(levelName: string | null | undefined): DungeonCompletionCondition | null {
+        const normalized = LevelConfig.normalizeLevelName(levelName) || String(levelName ?? '').trim();
+        const condition = normalized ? catalog.levels?.[normalized] : undefined;
+        return condition ? cloneCondition(condition) : null;
+    }
+
+    static getConfiguredLevelNames(): string[] {
+        return Object.keys(catalog.levels ?? {}).sort();
+    }
+
+    static isFullClear(levelName: string | null | undefined): boolean {
+        return DungeonCompletionConditions.get(levelName)?.mode === 'full-clear';
+    }
+
+    static requiresBosses(levelName: string | null | undefined): boolean {
+        return DungeonCompletionConditions.get(levelName)?.mode === 'bosses';
+    }
+
+    static sharesClientHostileWithParty(levelName: string | null | undefined, entity: any): boolean {
+        const condition = DungeonCompletionConditions.get(levelName);
+        if (!condition || condition.partyHostileSync !== 'bosses-only') {
+            return true;
+        }
+        return DungeonCompletionConditions.isRequiredBoss(levelName, entity);
+    }
+
+    static hasPostObjectiveCutscene(levelName: string | null | undefined): boolean {
+        return Boolean(DungeonCompletionConditions.get(levelName)?.cutscene?.requiredAfterObjectives);
+    }
+
+    static allowsDefeatedBossProxyCopies(levelName: string | null | undefined): boolean {
+        return Boolean(DungeonCompletionConditions.get(levelName)?.allowDefeatedBossProxyCopies);
+    }
+
+    static requiresPlayerDamageForClientBosses(levelName: string | null | undefined): boolean {
+        return Boolean(DungeonCompletionConditions.get(levelName)?.requirePlayerDamageForClientBosses);
+    }
+
+    static getSimultaneousBossWindowMs(levelName: string | null | undefined): number {
+        return Math.max(0, Math.round(Number(DungeonCompletionConditions.get(levelName)?.simultaneousBossWindowMs ?? 0)));
+    }
+
+    static getRequiredBossNames(levelName: string | null | undefined): ReadonlySet<string> {
+        const names = new Set<string>();
+        for (const group of DungeonCompletionConditions.get(levelName)?.bossGroups ?? []) {
+            for (const name of group) {
+                names.add(name);
+            }
+        }
+        return names;
+    }
+
+    static getCanonicalBossName(levelName: string | null | undefined, entity: any): string {
+        const condition = DungeonCompletionConditions.get(levelName);
+        if (!condition || condition.mode !== 'bosses') {
+            return '';
+        }
+
+        const requiredByKey = new Map<string, string>();
+        for (const group of condition.bossGroups ?? []) {
+            for (const name of group) {
+                requiredByKey.set(normalizeIdentity(name), name);
+            }
+        }
+        for (const [alias, canonical] of Object.entries(condition.bossAliases ?? {})) {
+            requiredByKey.set(normalizeIdentity(alias), canonical);
+        }
+
+        for (const entityName of getEntityNames(entity)) {
+            const canonical = requiredByKey.get(normalizeIdentity(entityName));
+            if (canonical) {
+                return canonical;
+            }
+        }
+        return '';
+    }
+
+    static isRequiredBoss(levelName: string | null | undefined, entity: any): boolean {
+        return Boolean(DungeonCompletionConditions.getCanonicalBossName(levelName, entity));
+    }
+
+    static isClientAuthorityBoss(levelName: string | null | undefined, entity: any): boolean {
+        if (!Boolean(entity?.clientSpawned)) {
+            return false;
+        }
+        const condition = DungeonCompletionConditions.get(levelName);
+        const allowed = new Set((condition?.clientAuthorityBosses ?? []).map(normalizeIdentity));
+        return getEntityNames(entity).some((name) => allowed.has(normalizeIdentity(name)));
+    }
+
+    static getObjectiveRole(levelName: string | null | undefined, entity: any): string {
+        const condition = DungeonCompletionConditions.get(levelName);
+        const entityKeys = new Set(getEntityNames(entity).map(normalizeIdentity));
+        for (const objective of condition?.entityObjectives ?? []) {
+            const keys = [...objective.names, ...(objective.aliases ?? [])].map(normalizeIdentity);
+            if (keys.some((key) => entityKeys.has(key))) {
+                return objective.role;
+            }
+        }
+        return '';
+    }
+
+    static validate(configuredDungeonLevelNames: Iterable<string>): string[] {
+        const errors: string[] = [];
+        if (Number(catalog.schemaVersion) !== DungeonCompletionConditions.SCHEMA_VERSION) {
+            errors.push(`schemaVersion must be ${DungeonCompletionConditions.SCHEMA_VERSION}`);
+        }
+
+        const levels = catalog.levels ?? {};
+        for (const levelName of configuredDungeonLevelNames) {
+            const normalized = LevelConfig.normalizeLevelName(levelName) || String(levelName ?? '').trim();
+            if (normalized && !levels[normalized]) {
+                errors.push(`missing condition for dungeon ${normalized}`);
+            }
+        }
+
+        for (const [levelName, condition] of Object.entries(levels)) {
+            if (!condition || !VALID_MODES.has(condition.mode)) {
+                errors.push(`${levelName}: invalid mode`);
+                continue;
+            }
+            if (
+                condition.partyHostileSync &&
+                !VALID_PARTY_HOSTILE_SYNC_POLICIES.has(condition.partyHostileSync)
+            ) {
+                errors.push(`${levelName}: invalid party hostile sync policy`);
+            }
+            if (condition.partyHostileSync === 'bosses-only' && condition.mode !== 'bosses') {
+                errors.push(`${levelName}: bosses-only party hostile sync requires boss mode`);
+            }
+            if (condition.mode === 'bosses') {
+                if (!condition.bossGroups?.length || condition.bossGroups.some((group) => !group.length)) {
+                    errors.push(`${levelName}: boss mode requires non-empty bossGroups`);
+                }
+                const canonicalBosses = new Set((condition.bossGroups ?? []).flat());
+                for (const [alias, canonical] of Object.entries(condition.bossAliases ?? {})) {
+                    if (!alias.trim() || !canonicalBosses.has(canonical)) {
+                        errors.push(`${levelName}: boss alias ${alias} targets unknown boss ${canonical}`);
+                    }
+                }
+                for (const clientBoss of condition.clientAuthorityBosses ?? []) {
+                    if (!canonicalBosses.has(clientBoss)) {
+                        errors.push(`${levelName}: client-authority boss ${clientBoss} is not required`);
+                    }
+                }
+            }
+            if (condition.mode !== 'bosses' && (condition.bossGroups?.length || condition.bossAliases)) {
+                errors.push(`${levelName}: non-boss mode must not define bosses`);
+            }
+            if (
+                condition.cutscene &&
+                !condition.cutscene.requiredAfterObjectives
+            ) {
+                errors.push(`${levelName}: invalid cutscene completion gate`);
+            }
+            for (const objective of condition.entityObjectives ?? []) {
+                if (!objective.role.trim() || !objective.names.length) {
+                    errors.push(`${levelName}: entity objective requires role and names`);
+                }
+            }
+        }
+        return errors;
+    }
+}

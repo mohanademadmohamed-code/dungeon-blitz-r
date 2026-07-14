@@ -1,10 +1,10 @@
 import { NpcLoader, NpcDef } from '../data/NpcLoader';
-import { DungeonSpawnLoader, DungeonSpawnConfig } from '../data/DungeonSpawnLoader';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 import { Client, clearClientSpawnFallbackTimer, createKeepTutorialState } from '../core/Client';
 import { BitReader } from '../network/protocol/bitReader';
-import { DebugConfig } from '../core/Debug';
 import { DeadHostileTombstone, GlobalState } from '../core/GlobalState';
+import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
+import { DungeonCompletionConditions } from '../core/DungeonCompletionConditions';
 import { Entity, EntityProps, EntityState, EntityTeam } from '../core/Entity';
 import { LevelConfig } from '../core/LevelConfig';
 import { GameData } from '../core/GameData';
@@ -16,7 +16,6 @@ import { areClientsInSameParty, getPartyIdForClient, isClientPartyLeader, shares
 import { areClientsInSameLevelScope, getClientLevelScope, getLevelScopeKey, getScopeLevelName } from '../core/LevelScope';
 import { getPartyRuntimeLevelForClient } from '../core/RuntimeLevel';
 import { markRoomBossEntity } from '../core/RoomBossState';
-import { logJcMini1Authority } from '../utils/JcMini1AuthorityLog';
 
 export class EntityHandler {
     private static readonly CLIENT_SPAWN_LEVELS = new Set<string>([
@@ -114,68 +113,6 @@ export class EntityHandler {
         );
     }
 
-    private static getDungeonSpawnConfigForLog(levelNameOrScope: string | null | undefined): DungeonSpawnConfig | null {
-        const levelName = LevelConfig.normalizeLevelName(getScopeLevelName(String(levelNameOrScope ?? '')));
-        return DungeonSpawnLoader.getSpawnConfigForLevel(levelName);
-    }
-
-    private static logDungeonSpawnServerSnapshot(
-        levelName: string,
-        levelScope: string,
-        client: Client,
-        levelMap: Map<number, any>
-    ): void {
-        const config = EntityHandler.getDungeonSpawnConfigForLog(levelName);
-        if (!config) {
-            return;
-        }
-
-        let live = 0;
-        let dead = 0;
-        for (const entity of levelMap.values()) {
-            if (!entity || entity.isPlayer || Number(entity.team ?? 0) !== EntityTeam.ENEMY || !entity.generatedFromScript) {
-                continue;
-            }
-
-            const isDead = Boolean(entity.dead) ||
-                Number(entity.entState ?? EntityState.ACTIVE) === EntityState.DEAD ||
-                Math.round(Number(entity.hp ?? 1)) <= 0;
-            if (isDead) {
-                dead++;
-            } else {
-                live++;
-            }
-        }
-
-        console.log(
-            `[DungeonSpawnServer] snapshot level=${config.levelId || config.levelName} levelName=${config.levelName} dungeon="${config.dungeonName}" scope=${levelScope} viewer=${String(client.character?.name ?? '')} live=${live} dead=${dead} total=${live + dead}`
-        );
-    }
-
-    private static logClientAuthorityDungeonSpawnProxy(
-        client: Client,
-        levelName: string | null | undefined,
-        entity: any,
-        localId: number,
-        canonical: any,
-        canonicalId: number,
-        result: string
-    ): void {
-        const config = EntityHandler.getDungeonSpawnConfigForLog(levelName);
-        if (!config) {
-            return;
-        }
-
-        const type = String(entity?.name ?? entity?.EntName ?? canonical?.name ?? '').replace(/\s+/g, '_');
-        const spawnKey = String(canonical?.spawnKey ?? entity?.spawnKey ?? '');
-        console.log(
-            `[ClientAuthority] local hostile spawn blocked level=${config.levelId || config.levelName} levelName=${config.levelName} dungeon="${config.dungeonName}" viewer=${String(client.character?.name ?? '')} rawLocalId=${localId} type=${type} pos=${Math.round(Number(entity?.x ?? 0))},${Math.round(Number(entity?.y ?? 0))} result=${result}`
-        );
-        console.log(
-            `[ClientAuthority] server enemy proxy created level=${config.levelId || config.levelName} levelName=${config.levelName} dungeon="${config.dungeonName}" viewer=${String(client.character?.name ?? '')} rawLocalId=${localId} canonicalId=${canonicalId} spawnKey=${spawnKey} result=${result}`
-        );
-    }
-
     private static getServerAuthorityDestroyedIds(levelScope: string): Set<number> {
         let destroyedIds = EntityHandler.serverAuthorityDestroyedIdsByScope.get(levelScope);
         if (!destroyedIds) {
@@ -250,7 +187,6 @@ export class EntityHandler {
 
         const count = GlobalState.deadServerAuthorityHostilesByScope.get(scopeKey)?.size ?? 0;
         GlobalState.deadServerAuthorityHostilesByScope.delete(scopeKey);
-        console.log(`[MultiplayerSync][hostile-tombstones-clear] scope=${scopeKey} reason=${reason} count=${count}`);
     }
 
     static upsertDeadServerAuthorityHostileTombstone(
@@ -295,10 +231,6 @@ export class EntityHandler {
         if (fingerprint) {
             EntityHandler.getServerAuthorityDestroyedFingerprints(scopeKey).add(fingerprint);
         }
-
-        console.log(
-            `[MultiplayerSync][hostile-tombstone-create] scope=${scopeKey} canonicalId=${canonicalId} spawnKey=${spawnKey} name=${String(tombstone.name).replace(/\s+/g, '_')} killer=${tombstone.killerToken} deathVersion=${tombstone.deathVersion}`
-        );
         return tombstone;
     }
 
@@ -440,12 +372,6 @@ export class EntityHandler {
         }
 
         const destroyedIds = EntityHandler.getServerAuthorityDestroyedIds(levelScope);
-        const dungeonSpawnConfig = EntityHandler.getDungeonSpawnConfigForLog(levelName);
-        if (dungeonSpawnConfig) {
-            console.log(
-                `[DungeonSpawnServer] init level=${dungeonSpawnConfig.levelId || dungeonSpawnConfig.levelName} levelName=${dungeonSpawnConfig.levelName} dungeon="${dungeonSpawnConfig.dungeonName}" scope=${levelScope} enemies=${dungeonSpawnConfig.enemies.length} requiredForClear=${dungeonSpawnConfig.enemies.filter((enemy) => enemy.requiredForClear).length}`
-            );
-        }
 
         for (const npc of NpcLoader.getNpcsForLevel(levelName)) {
             const npcId = Math.max(0, Math.round(Number(npc.id ?? 0)));
@@ -459,27 +385,6 @@ export class EntityHandler {
                 continue;
             }
             levelMap.set(npcId, entityProps);
-            if (dungeonSpawnConfig || (entityProps as any).generatedFromScript) {
-                console.log(
-                    `[DungeonSpawnServer] spawn level=${dungeonSpawnConfig?.levelId || (entityProps as any).levelId || levelName} levelName=${dungeonSpawnConfig?.levelName || levelName} dungeon="${dungeonSpawnConfig?.dungeonName || (entityProps as any).dungeonName || levelName}" scope=${levelScope} canonicalId=${npcId} spawnKey=${String((entityProps as any).spawnKey ?? '')} type=${String(entityProps.name ?? '')} room=${Number(entityProps.roomId ?? -1)} pos=${Math.round(Number(entityProps.x ?? 0))},${Math.round(Number(entityProps.y ?? 0))}`
-                );
-            }
-            logJcMini1Authority('seed_server_hostile', {
-                entityId: npcId,
-                name: entityProps.name,
-                team: entityProps.team,
-                roomId: entityProps.roomId,
-                x: entityProps.x,
-                y: entityProps.y,
-                entityLevel: entityProps.level,
-                hp: Math.round(Number((entityProps as any).hp ?? 0)),
-                maxHp: Math.round(Number((entityProps as any).maxHp ?? 0)),
-                dead: Boolean((entityProps as any).dead),
-                entState: entityProps.entState,
-                scope: levelScope,
-                character: client.character?.name ?? '',
-                token: client.token
-            });
         }
 
         EntityHandler.serverAuthoritySeededScopes.add(levelScope);
@@ -572,14 +477,6 @@ export class EntityHandler {
         }
 
         if (moved > 0) {
-            logJcMini1Authority('party_scope_entity_migrate', {
-                oldScope,
-                newScope,
-                moved,
-                viewer: client.character?.name ?? '',
-                viewerToken: client.token,
-                clientEntID: client.clientEntID
-            });
         }
     }
 
@@ -609,15 +506,6 @@ export class EntityHandler {
                     .length
             });
         }
-
-        logJcMini1Authority('party_scope_snapshot', {
-            reason,
-            scope: getLevelScopeKey(levelName, client.levelInstanceId),
-            partyId: getPartyIdForClient(client),
-            viewer: client.character?.name ?? '',
-            viewerToken: client.token,
-            partyMembers
-        });
     }
 
     static ensureJcMini1PartySharedScope(client: Client, rawLevelName: string | null | undefined, reason: string): string {
@@ -648,19 +536,6 @@ export class EntityHandler {
         if (oldScope !== newScope || oldInstanceId !== targetInstanceId) {
             client.levelInstanceId = targetInstanceId;
             EntityHandler.moveClientOwnedEntitiesBetweenScopes(client, oldScope, newScope);
-            logJcMini1Authority('party_scope_adopted', {
-                reason,
-                oldInstanceId,
-                newInstanceId: targetInstanceId,
-                oldScope,
-                newScope,
-                partyId: getPartyIdForClient(client),
-                viewer: client.character?.name ?? '',
-                viewerToken: client.token,
-                anchor: anchor?.character?.name ?? '',
-                anchorToken: anchor?.token ?? 0,
-                anchorScope: anchor ? getClientLevelScope(anchor) : ''
-            });
         }
 
         EntityHandler.emitJcMini1PartyScopeSnapshot(client, levelName, reason);
@@ -862,24 +737,6 @@ export class EntityHandler {
         if (damageTaken > 0) {
             client.send(0x78, EntityHandler.buildHpDeltaPayload(localId, -damageTaken));
         }
-
-        logJcMini1Authority('proxy_initial_hp_sync', {
-            packetId: '0x78',
-            reason,
-            entityId: canonicalId,
-            localEntityId: localId,
-            name: canonical?.name ?? '',
-            viewer: client.character?.name ?? '',
-            viewerToken: client.token,
-            scope: getClientLevelScope(client),
-            entityLevel: canonical?.level,
-            hp,
-            maxHp,
-            positiveDelta: maxHp,
-            negativeDelta: damageTaken > 0 ? -damageTaken : 0,
-            dead: Boolean(canonical?.dead),
-            entState: canonical?.entState
-        });
     }
 
     static ensureServerAuthorityProxyOwner(client: Client, canonicalEntity: any, localEntityId: number): boolean {
@@ -906,19 +763,6 @@ export class EntityHandler {
             canonicalEntity.proxyOwnerToken = client.token;
             canonicalEntity.proxyOwnerName = client.character?.name ?? '';
             canonicalEntity.proxyOwnerLocalId = localId;
-            logJcMini1Authority(previousOwnerToken > 0 ? 'proxy_owner_migrated' : 'proxy_owner_selected', {
-                entityId: canonicalId,
-                localEntityId: localId,
-                previousOwnerToken,
-                ownerToken: client.token,
-                owner: client.character?.name ?? '',
-                name: canonicalEntity.name,
-                scope: levelScope,
-                hp: Math.round(Number(canonicalEntity.hp ?? 0)),
-                maxHp: Math.round(Number(canonicalEntity.maxHp ?? 0)),
-                dead: Boolean(canonicalEntity.dead),
-                entState: canonicalEntity.entState
-            });
             return true;
         }
 
@@ -1059,15 +903,6 @@ export class EntityHandler {
 
             const localId = EntityHandler.findClientLocalServerAuthorityProxyForCanonical(viewer, levelName, canonical);
             if (localId <= 0) {
-                logJcMini1Authority('canonical_visible_bridge_wait_for_proxy', {
-                    reason: 'first_sight_owner_canonical_fanout',
-                    entityId: Math.max(0, Math.round(Number(canonical?.id ?? 0))),
-                    localEntityId: 0,
-                    name: canonical?.name ?? '',
-                    viewer: viewer.character?.name ?? '',
-                    viewerToken: viewer.token,
-                    scope: levelScope
-                });
                 continue;
             }
 
@@ -1131,16 +966,6 @@ export class EntityHandler {
         client.send(0x0D, EntityHandler.buildDestroyEntityPayload(localId));
         client.entities.delete(localId);
         client.knownEntityIds.delete(localId);
-
-        console.log(
-            `[MultiplayerSync][rejoin-dead-hostile-suppressed] viewer=${String(client.character?.name ?? '')} token=${client.token} scope=${scope} rawLocalId=${localId} canonicalId=${tombstone.canonicalId} spawnKey=${tombstone.spawnKey}`
-        );
-        console.log(
-            `[MultiplayerSync][death-correction-on-rejoin] viewer=${String(client.character?.name ?? '')} token=${client.token} localId=${localId} canonicalId=${tombstone.canonicalId} spawnKey=${tombstone.spawnKey}`
-        );
-        console.log(
-            `[LootSync][rejoin-dead-hostile-no-loot] viewer=${String(client.character?.name ?? '')} token=${client.token} canonicalId=${tombstone.canonicalId} spawnKey=${tombstone.spawnKey} reason=tombstone_exists`
-        );
     }
 
     private static attachServerAuthorityClientHostileProxy(
@@ -1167,18 +992,6 @@ export class EntityHandler {
             if (localId > 0 && tombstone.canonicalId > 0 && localId !== tombstone.canonicalId) {
                 EntityHandler.rememberEntityAlias(client, localId, tombstone.canonicalId);
             }
-            console.log(
-                `[MultiplayerSync][spawnkey-match] scope=${levelScope} rawLocalId=${localId} canonicalId=${tombstone.canonicalId} spawnKey=${tombstone.spawnKey} result=tombstone`
-            );
-            EntityHandler.logClientAuthorityDungeonSpawnProxy(
-                client,
-                levelName,
-                entity,
-                localId,
-                { spawnKey: tombstone.spawnKey },
-                tombstone.canonicalId,
-                'tombstone'
-            );
             EntityHandler.sendTombstoneDeathCorrectionOnRejoin(client, entity, localId, tombstone);
             return true;
         }
@@ -1192,9 +1005,6 @@ export class EntityHandler {
         const canonical = existingCanonical ??
             EntityHandler.promoteFirstSightServerAuthorityHostile(client, levelName, levelMap, entity, rawEntityId);
         if (!canonical) {
-            console.log(
-                `[MultiplayerSync][spawnkey-match] scope=${levelScope} rawLocalId=${Math.max(0, Math.round(Number(rawEntityId || entity.id) || 0))} canonicalId=0 spawnKey=${String(entity.spawnKey ?? '')} result=miss`
-            );
             return false;
         }
 
@@ -1204,35 +1014,10 @@ export class EntityHandler {
         if (canonicalId <= 0 || localId <= 0) {
             return false;
         }
-        console.log(
-            `[MultiplayerSync][spawnkey-match] scope=${levelScope} rawLocalId=${localId} canonicalId=${canonicalId} spawnKey=${String(entity.spawnKey ?? EntityHandler.getHostileSpawnKey(levelScope, entity))} result=active`
-        );
-        EntityHandler.logClientAuthorityDungeonSpawnProxy(
-            client,
-            levelName,
-            entity,
-            localId,
-            canonical,
-            canonicalId,
-            'active'
-        );
 
         const existingLocalId = EntityHandler.findExistingServerAuthorityProxyLocalId(client, canonicalId, localId);
         if (existingLocalId > 0) {
             EntityHandler.destroyClientLocalEntity(client, localId, 'proxy_duplicate_destroy', entity);
-            logJcMini1Authority('proxy_duplicate_destroy', {
-                entityId: canonicalId,
-                localEntityId: localId,
-                existingLocalEntityId: existingLocalId,
-                name: canonical.name,
-                viewer: client.character?.name ?? '',
-                viewerToken: client.token,
-                scope: getClientLevelScope(client),
-                hp: Math.round(Number(canonical.hp ?? 0)),
-                maxHp: Math.round(Number(canonical.maxHp ?? 0)),
-                dead: Boolean(canonical.dead),
-                entState: canonical.entState
-            });
             return true;
         }
 
@@ -1272,63 +1057,14 @@ export class EntityHandler {
             };
             client.entities.set(localId, proxyEntity);
 
-            logJcMini1Authority('proxy_attach', {
-                entityId: canonicalId,
-                localEntityId: localId,
-                rawEntityId,
-                name: canonical.name,
-                proxyName: entity.name,
-                viewer: client.character?.name ?? '',
-                viewerToken: client.token,
-                ownerToken: canonical.proxyOwnerToken ?? 0,
-                scope: getClientLevelScope(client),
-                roomId: canonical.roomId,
-                viewerRoomId: client.currentRoomId,
-                entityLevel: canonical.level,
-                hp: Math.round(Number(canonical.hp ?? 0)),
-                maxHp: Math.round(Number(canonical.maxHp ?? 0)),
-                dead: isDead,
-                entState: canonical.entState
-            });
-
             if (isDead) {
                 const maxHp = Math.max(0, Math.round(Number(canonical.maxHp ?? 0)));
                 if (maxHp > 0) {
                     client.send(0x78, EntityHandler.buildHpDeltaPayload(localId, -maxHp));
-                    logJcMini1Authority('authoritative_hp_correction', {
-                        packetId: '0x78',
-                        reason: 'late_proxy_dead_canonical',
-                        entityId: canonicalId,
-                        localEntityId: localId,
-                        viewer: client.character?.name ?? '',
-                        viewerToken: client.token,
-                        scope: getClientLevelScope(client),
-                        previousHp: maxHp,
-                        expectedDamage: 0,
-                        expectedPostPacketHp: maxHp,
-                        canonicalHp: 0,
-                        maxHp,
-                        delta: -maxHp,
-                        dead: true,
-                        entState: EntityState.DEAD
-                    });
                 }
                 client.send(0x07, EntityHandler.buildEntityStateDeadPayload(localId));
                 client.send(0x0D, EntityHandler.buildDestroyEntityPayload(localId));
                 client.entities.delete(localId);
-                logJcMini1Authority('canonical_state_to_proxy', {
-                    packetId: maxHp > 0 ? '0x78+0x07+0x0D' : '0x07+0x0D',
-                    reason: 'late_proxy_dead_canonical',
-                    entityId: canonicalId,
-                    localEntityId: localId,
-                    viewer: client.character?.name ?? '',
-                    viewerToken: client.token,
-                    scope: getClientLevelScope(client),
-                    hp: 0,
-                    maxHp,
-                    dead: true,
-                    entState: EntityState.DEAD
-                });
             } else {
                 EntityHandler.sendServerAuthorityProxyInitialHpSync(client, canonical, localId, 'proxy_attach');
             }
@@ -1345,26 +1081,6 @@ export class EntityHandler {
                 isDead,
                 isDead ? 'proxy_bridge_attach_dead' : 'proxy_bridge_attach_live'
             );
-
-            logJcMini1Authority('proxy_attach', {
-                entityId: canonicalId,
-                localEntityId: localId,
-                rawEntityId,
-                name: canonical.name,
-                proxyName: entity.name,
-                viewer: client.character?.name ?? '',
-                viewerToken: client.token,
-                ownerToken: canonical.proxyOwnerToken ?? 0,
-                scope: getClientLevelScope(client),
-                roomId: canonical.roomId,
-                viewerRoomId: client.currentRoomId,
-                entityLevel: canonical.level,
-                hp: Math.round(Number(canonical.hp ?? 0)),
-                maxHp: Math.round(Number(canonical.maxHp ?? 0)),
-                dead: isDead,
-                entState: canonical.entState,
-                bridge: true
-            });
             return true;
         }
         EntityHandler.replaceClientHostileProxyWithCanonical(
@@ -1376,64 +1092,15 @@ export class EntityHandler {
             entity
         );
 
-        logJcMini1Authority('proxy_attach', {
-            entityId: canonicalId,
-            localEntityId: localId,
-            rawEntityId,
-            name: canonical.name,
-            proxyName: entity.name,
-            viewer: client.character?.name ?? '',
-            viewerToken: client.token,
-            ownerToken: canonical.proxyOwnerToken ?? 0,
-            scope: getClientLevelScope(client),
-            roomId: canonical.roomId,
-            viewerRoomId: client.currentRoomId,
-            entityLevel: canonical.level,
-            hp: Math.round(Number(canonical.hp ?? 0)),
-            maxHp: Math.round(Number(canonical.maxHp ?? 0)),
-            dead: isDead,
-            entState: canonical.entState
-        });
-
         if (isDead) {
             const maxHp = Math.max(0, Math.round(Number(canonical.maxHp ?? 0)));
             if (maxHp > 0) {
                 client.send(0x78, EntityHandler.buildHpDeltaPayload(canonicalId, -maxHp));
-                logJcMini1Authority('authoritative_hp_correction', {
-                    packetId: '0x78',
-                    reason: 'late_proxy_dead_canonical',
-                    entityId: canonicalId,
-                    localEntityId: canonicalId,
-                    viewer: client.character?.name ?? '',
-                    viewerToken: client.token,
-                    scope: getClientLevelScope(client),
-                    previousHp: maxHp,
-                    expectedDamage: 0,
-                    expectedPostPacketHp: maxHp,
-                    canonicalHp: 0,
-                    maxHp,
-                    delta: -maxHp,
-                    dead: true,
-                    entState: EntityState.DEAD
-                });
             }
             client.send(0x07, EntityHandler.buildEntityStateDeadPayload(canonicalId));
             client.send(0x0D, EntityHandler.buildDestroyEntityPayload(canonicalId));
             client.entities.delete(canonicalId);
             client.knownEntityIds.delete(canonicalId);
-            logJcMini1Authority('canonical_state_to_proxy', {
-                packetId: maxHp > 0 ? '0x78+0x07+0x0D' : '0x07+0x0D',
-                reason: 'late_proxy_dead_canonical',
-                entityId: canonicalId,
-                localEntityId: canonicalId,
-                viewer: client.character?.name ?? '',
-                viewerToken: client.token,
-                scope: getClientLevelScope(client),
-                hp: 0,
-                maxHp,
-                dead: true,
-                entState: EntityState.DEAD
-            });
         }
 
         return true;
@@ -1494,26 +1161,6 @@ export class EntityHandler {
                 EntityHandler.sendSetUntargetable(client, canonicalId, true);
             }
         }
-
-        logJcMini1Authority('canonical_spawn_replace_proxy', {
-            packetId: localId > 0 && (localId !== canonicalId || !hasServerCanonical)
-                ? (needsCanonicalSpawn ? '0x0D+0x0F' : '0x0D')
-                : '0x0F',
-            reason,
-            entityId: canonicalId,
-            localEntityId: localId,
-            name: snapshot.name,
-            viewer: client.character?.name ?? '',
-            viewerToken: client.token,
-            scope: getClientLevelScope(client),
-            hp: Math.round(Number(snapshot.hp ?? 0)),
-            maxHp: Math.round(Number(snapshot.maxHp ?? 0)),
-            healthDelta: Math.round(Number(snapshot.healthDelta ?? 0)),
-            dead: Boolean(snapshot.dead),
-            entState: snapshot.entState,
-            untargetable: Boolean(snapshot.untargetable),
-            canonicalSpawnSent: needsCanonicalSpawn
-        });
     }
 
     private static bridgeCanonicalVisibleServerAuthorityProxy(
@@ -1578,20 +1225,6 @@ export class EntityHandler {
             client.send(0x0D, EntityHandler.buildDestroyEntityPayload(localId));
             client.entities.delete(localId);
             client.knownEntityIds.delete(localId);
-            logJcMini1Authority('canonical_visible_proxy_dead_cleanup', {
-                packetId: maxHp > 0 ? '0x78+0x07+0x0D' : '0x07+0x0D',
-                reason,
-                entityId: canonicalId,
-                localEntityId: localId,
-                name: canonical.name,
-                viewer: client.character?.name ?? '',
-                viewerToken: client.token,
-                scope: getClientLevelScope(client),
-                hp: 0,
-                maxHp,
-                dead: true,
-                entState: EntityState.DEAD
-            });
             return;
         }
 
@@ -1599,23 +1232,6 @@ export class EntityHandler {
         if (Boolean(canonical.untargetable)) {
             EntityHandler.sendSetUntargetable(client, localId, true);
         }
-
-        logJcMini1Authority('canonical_visible_proxy_bridge', {
-            packetId: '0x78',
-            reason,
-            entityId: canonicalId,
-            localEntityId: localId,
-            name: canonical.name,
-            proxyName: localEntity?.name ?? '',
-            viewer: client.character?.name ?? '',
-            viewerToken: client.token,
-            scope: getClientLevelScope(client),
-            hp,
-            maxHp,
-            dead: false,
-            entState: bridgedEntity.entState,
-            untargetable: Boolean(canonical.untargetable)
-        });
     }
 
     private static isDestroyedServerAuthorityHostileProxy(client: Client, entity: any): boolean {
@@ -1659,21 +1275,6 @@ export class EntityHandler {
         client.send(0x0D, EntityHandler.buildDestroyEntityPayload(localId));
         client.entities.delete(localId);
         client.knownEntityIds.delete(localId);
-
-        logJcMini1Authority('dead_fingerprint_proxy_destroy', {
-            entityId: localId,
-            rawEntityId: localId,
-            name: entity?.name ?? entity?.EntName ?? '',
-            viewer: client.character?.name ?? '',
-            viewerToken: client.token,
-            scope: getClientLevelScope(client),
-            roomId: entity?.roomId,
-            x: Math.round(Number(entity?.x ?? 0)),
-            y: Math.round(Number(entity?.y ?? 0)),
-            maxHp,
-            dead: true,
-            entState: EntityState.DEAD
-        });
     }
 
     private static promoteFirstSightServerAuthorityHostile(
@@ -1721,9 +1322,6 @@ export class EntityHandler {
         };
         EntityHandler.normalizeServerAuthorityHostileState(normalizedLevelName, canonical);
         levelMap.set(canonicalId, canonical);
-        console.log(
-            `[MultiplayerSync][first-sight-authority] scope=${getClientLevelScope(client)} source=${String(client.character?.name ?? '')} sourceToken=${client.token} entityId=${canonicalId} name=${String(canonical.name ?? '')} hp=${Math.round(Number(canonical.hp ?? 0))} maxHp=${Math.round(Number(canonical.maxHp ?? 0))}`
-        );
         EntityHandler.fanOutCanonicalVisibleServerAuthorityHostile(client, normalizedLevelName, canonical);
         return canonical;
     }
@@ -1762,6 +1360,7 @@ export class EntityHandler {
         EntityHandler.serverAuthorityDestroyedFingerprintsByScope.delete(levelScope);
         EntityHandler.clearDeadServerAuthorityHostileTombstones(levelScope, 'new_run');
         GlobalState.levelQuestProgress.delete(levelScope);
+        DungeonCompletionSystem.reset(levelScope);
         const keyPrefix = `${levelScope}:`;
         for (const key of Array.from(GlobalState.combatContributions.keys())) {
             if (key.startsWith(keyPrefix)) {
@@ -1778,13 +1377,6 @@ export class EntityHandler {
                 GlobalState.entityLastRewardNonces.delete(key);
             }
         }
-
-        logJcMini1Authority('fresh_scope_reset', {
-            scope: levelScope,
-            viewer: client.character?.name ?? '',
-            viewerToken: client.token,
-            removed
-        });
     }
 
     static suppressServerAuthorityClientHostileSpawn(
@@ -1819,17 +1411,6 @@ export class EntityHandler {
         client.knownEntityIds.delete(localId);
         client.entityIdAliases?.delete(localId);
         client.send(0x0D, EntityHandler.buildDestroyEntityPayload(localId));
-        logJcMini1Authority('client_local_hostile_destroy', {
-            reason,
-            rawEntityId: localId,
-            name: entity?.name ?? entity?.EntName ?? '',
-            team: entity?.team ?? '',
-            scope: getClientLevelScope(client),
-            viewer: client.character?.name ?? '',
-            viewerToken: client.token,
-            viewerRoomId: client.currentRoomId,
-            knownEntityIds: Array.from(client.knownEntityIds ?? []).slice(0, 80)
-        });
     }
 
     private static usesLeaderAuthoritativeClientSpawns(levelName: string | null | undefined): boolean {
@@ -1849,16 +1430,6 @@ export class EntityHandler {
             Boolean(entity?.destroyed) ||
             Number(entity?.entState ?? EntityState.ACTIVE) === EntityState.DEAD ||
             Math.round(Number(entity?.hp ?? 1)) <= 0;
-    }
-
-    private static formatMultiplayerAliasDetails(details: Record<string, unknown>): string {
-        return Object.entries(details)
-            .map(([key, value]) => `${key}=${String(value)}`)
-            .join(' ');
-    }
-
-    private static logMultiplayerAlias(label: string, details: Record<string, unknown>): void {
-        console.log(`[MultiplayerSync][${label}] ${EntityHandler.formatMultiplayerAliasDetails(details)}`);
     }
 
     private static getHostileAliasMap(entity: any): Map<number, number> {
@@ -1961,15 +1532,6 @@ export class EntityHandler {
         }
         client.knownEntityIds.add(localId);
         client.knownEntityIds.add(canonicalId);
-        EntityHandler.logMultiplayerAlias('alias-register', {
-            scope: levelScope,
-            viewer: client.character?.name ?? '',
-            token: client.token,
-            localId,
-            canonicalId,
-            reason
-        });
-        EntityHandler.dumpHostileAliasTable(levelScope);
     }
 
     static resolveHostileLocalIdForViewer(
@@ -2023,14 +1585,6 @@ export class EntityHandler {
             EntityHandler.registerCanonicalHostileAlias(viewer, levelScope, canonical, entityId, 'owner_canonical_visible');
             return { ok: true, localId: entityId, entity: canonical, reason: 'owner_canonical_visible' };
         }
-
-        EntityHandler.logMultiplayerAlias('alias-miss-outbound', {
-            packet: packetLabel,
-            viewer: viewer.character?.name ?? '',
-            token: viewer.token,
-            canonicalId: entityId,
-            reason: 'missing_viewer_local_id'
-        });
         return { ok: false, localId: 0, entity: canonical, reason: 'missing_viewer_local_id' };
     }
 
@@ -2040,55 +1594,6 @@ export class EntityHandler {
         }
         const aliasMap = EntityHandler.getHostileAliasMap(canonical);
         return Math.max(0, Math.round(Number(aliasMap.get(viewer.token)) || 0));
-    }
-
-    static logAliasOutbound(packetLabel: string, viewer: Client, canonicalId: number, localId: number): void {
-        EntityHandler.logMultiplayerAlias('alias-out', {
-            packet: packetLabel,
-            viewer: viewer.character?.name ?? '',
-            token: viewer.token,
-            canonicalId,
-            localId
-        });
-    }
-
-    static dumpHostileAliasTable(levelScope: string): void {
-        const levelMap = GlobalState.levelEntities.get(levelScope);
-        if (!levelMap) {
-            return;
-        }
-
-        const rows: string[] = [];
-        for (const [id, entity] of levelMap.entries()) {
-            if (
-                !entity ||
-                Boolean(entity.isPlayer) ||
-                Number(entity.team ?? 0) !== EntityTeam.ENEMY ||
-                (
-                    !EntityHandler.isSharedClientSpawnRegionActor(getScopeLevelName(levelScope), entity) &&
-                    !EntityHandler.isServerAuthorityHostileEntity(getScopeLevelName(levelScope), entity)
-                )
-            ) {
-                continue;
-            }
-            const aliasMap = EntityHandler.getHostileAliasMap(entity);
-            const aliasParts: string[] = [];
-            for (const [token, localId] of aliasMap.entries()) {
-                const session = GlobalState.sessionsByToken.get(token);
-                const name = session?.character?.name ? `${session.character.name}Local` : `token${token}Local`;
-                aliasParts.push(`${name}=${localId}`);
-            }
-            rows.push(
-                `canonicalId=${Math.max(0, Math.round(Number(entity.canonicalId ?? id) || 0))} ` +
-                `name=${String(entity.name ?? entity.EntName ?? '')} ` +
-                `owner=${String(entity.ownerCharacterName ?? entity.combatAuthorityName ?? entity.ownerToken ?? '')} ` +
-                `${aliasParts.join(' ')} hp=${Math.round(Number(entity.hp ?? 0))}`
-            );
-        }
-        if (rows.length === 0) {
-            return;
-        }
-        console.log(`[MultiplayerSync][alias-table] scope=${levelScope}\n  ${rows.join('\n  ')}`);
     }
 
     static isHomeDummyEntity(entity: any): boolean {
@@ -2170,19 +1675,6 @@ export class EntityHandler {
                     oldMaxHp !== Math.round(Number(entity.maxHp ?? 0))
                 ) {
                     updatedCount++;
-                    logJcMini1Authority('entity_level_rescale', {
-                        entityId,
-                        name: entity.name,
-                        oldLevel,
-                        newLevel: entity.level,
-                        oldHp,
-                        newHp: entity.hp,
-                        oldMaxHp,
-                        newMaxHp: entity.maxHp,
-                        scope: levelScope,
-                        character: client.character?.name ?? '',
-                        token: client.token
-                    });
                 }
                 continue;
             }
@@ -2294,7 +1786,15 @@ export class EntityHandler {
     }
 
     private static isPartySharedClientSpawnHostile(levelName: string | null | undefined, entity: any): boolean {
-        return EntityHandler.isSharedClientSpawnRegionActor(levelName, entity) && Number(entity?.team ?? 0) === 2;
+        return EntityHandler.isSharedClientSpawnRegionActor(levelName, entity) &&
+            Number(entity?.team ?? 0) === 2 &&
+            DungeonCompletionConditions.sharesClientHostileWithParty(levelName, entity);
+    }
+
+    private static isPrivateClientSpawnDungeonHostile(levelName: string | null | undefined, entity: any): boolean {
+        return EntityHandler.isSharedClientSpawnRegionActor(levelName, entity) &&
+            Number(entity?.team ?? 0) === EntityTeam.ENEMY &&
+            !DungeonCompletionConditions.sharesClientHostileWithParty(levelName, entity);
     }
 
     private static findLeaderAuthoritativeClientSpawnMatch(
@@ -2525,6 +2025,7 @@ export class EntityHandler {
             !levelMap ||
             !LevelConfig.isDungeonLevel(levelName) ||
             EntityHandler.usesServerAuthorityHostiles(levelName) ||
+            EntityHandler.isPrivateClientSpawnDungeonHostile(levelName, entity) ||
             !entity ||
             entity.isPlayer ||
             Number(entity.team ?? 0) !== EntityTeam.ENEMY
@@ -2920,10 +2421,12 @@ export class EntityHandler {
         levelMap: Map<number, any> | null,
         entity: any
     ): boolean {
-        if (!levelName || !levelMap || !EntityHandler.isSharedClientSpawnRegionActor(levelName, entity)) {
-            if (DebugConfig.enabled) {
-                console.log(`[Dedup] SKIP: isSharedClientSpawnRegionActor=false for ${entity?.name} in ${levelName} (clientSpawned=${entity?.clientSpawned}, team=${entity?.team})`);
-            }
+        if (
+            !levelName ||
+            !levelMap ||
+            !EntityHandler.isSharedClientSpawnRegionActor(levelName, entity) ||
+            EntityHandler.isPrivateClientSpawnDungeonHostile(levelName, entity)
+        ) {
             return false;
         }
 
@@ -2940,18 +2443,7 @@ export class EntityHandler {
             client.token
         );
         if (!canonical) {
-            if (DebugConfig.enabled) {
-                console.log(`[Dedup] NO MATCH for ${entity?.name} (id=${entity?.id}, team=${entity?.team}) in ${levelName}. LevelMap has ${levelMap.size} entities. PartyId=${partyId}, ownerToken=${client.token}`);
-                for (const [cId, c] of levelMap.entries()) {
-                    if (c?.clientSpawned && !c?.isPlayer) {
-                        console.log(`[Dedup]   candidate id=${cId} name=${c?.name} team=${c?.team} ownerToken=${c?.ownerToken} ownerPartyId=${c?.ownerPartyId}`);
-                    }
-                }
-            }
             return false;
-        }
-        if (DebugConfig.enabled) {
-            console.log(`[Dedup] MATCH found! ${entity?.name} (id=${entity?.id}) -> canonical id=${canonical?.id} ownerToken=${canonical?.ownerToken}`);
         }
 
         const duplicateId = Number(entity?.id ?? 0);
@@ -3019,7 +2511,10 @@ export class EntityHandler {
     }
 
     static shouldRelayEntityToOtherClients(levelName: string | null | undefined, entity: any): boolean {
-        if (EntityHandler.isPrivateClientSpawnOutdoorEntity(levelName, entity)) {
+        if (
+            EntityHandler.isPrivateClientSpawnOutdoorEntity(levelName, entity) ||
+            EntityHandler.isPrivateClientSpawnDungeonHostile(levelName, entity)
+        ) {
             return false;
         }
 
@@ -3190,22 +2685,6 @@ export class EntityHandler {
         return GlobalState.dungeonCutscenes.has(`${levelScope}:${normalizedRoomId}`);
     }
 
-    private static logCutsceneReplaySkip(joiner: Client, roomId: number): void {
-        if (String(process.env.DEBUG_CUTSCENE_SYNC ?? '').trim() !== '1') {
-            return;
-        }
-
-        console.log(
-            `[CutsceneSync][joiner-replay-skip-active-cutscene] ` +
-            JSON.stringify({
-                character: String(joiner.character?.name ?? ''),
-                token: joiner.token,
-                scope: getClientLevelScope(joiner),
-                roomId
-            })
-        );
-    }
-
     private static replayStartedDungeonRoomEventsToJoiner(joiner: Client): void {
         const levelName = LevelConfig.normalizeLevelName(joiner.currentLevel);
         if (!levelName || !LevelConfig.isDungeonLevel(levelName) || !joiner.playerSpawned) {
@@ -3257,7 +2736,6 @@ export class EntityHandler {
 
         for (const roomId of anchorStartedRoomIds) {
             if (EntityHandler.hasSharedDungeonCutsceneState(levelScope, roomId)) {
-                EntityHandler.logCutsceneReplaySkip(joiner, roomId);
                 continue;
             }
 
@@ -3829,30 +3307,6 @@ export class EntityHandler {
         if (EntityHandler.isServerAuthorityHostileEntity(client.currentLevel, props)) {
             const entityId = Math.max(0, Math.round(Number(props.id ?? 0)));
             const localEntityId = EntityHandler.resolveEntityLocalId(client, entityId);
-            logJcMini1Authority('entity_send_to_viewer', {
-                packetId: '0x0F',
-                entityId,
-                localEntityId,
-                name: props.name,
-                roomId: props.roomId,
-                entityLevel: props.level,
-                hp: Math.round(Number((props as any).hp ?? 0)),
-                maxHp: Math.round(Number((props as any).maxHp ?? 0)),
-                healthDelta: Math.round(Number(props.healthDelta ?? 0)),
-                dead: Boolean((props as any).dead),
-                entState: props.entState,
-                scope: getClientLevelScope(client),
-                viewer: client.character?.name ?? '',
-                viewerToken: client.token,
-                viewerRoomId: client.currentRoomId,
-                playerLevel: Math.round(Number(client.character?.level ?? 0)),
-                playerHp: Math.round(Number(client.authoritativeCurrentHp ?? 0)),
-                playerMaxHp: Math.round(Number(client.authoritativeMaxHp ?? 0)),
-                knownCanonical: client.knownEntityIds.has(entityId),
-                knownLocal: client.knownEntityIds.has(localEntityId),
-                hasCanonicalEntity: client.entities.has(entityId),
-                hasLocalEntity: client.entities.has(localEntityId)
-            });
         }
     }
 
@@ -4045,21 +3499,21 @@ export class EntityHandler {
             return;
         }
 
-        if (!isPlayer && levelName && DebugConfig.enabled) {
-            console.log(`[EntityHandler] Non-player entity ACCEPTED: id=${entityId} name=${entName} team=${team} from ${client.character?.name} in ${levelName} scope=${getClientLevelScope(client)} levelMap.size=${levelMap?.size ?? 'null'}`);
-        }
-
         client.entities.set(entityId, props);
         noteDungeonRunEntitySeen(client, entityId, props);
         EntityHandler.rememberEntityKnown(client, levelName, props);
 
-        // Update GlobalState
-        if (levelMap) {
+        // Client-private dungeon hostiles remain local to their authored client.
+        // They must never become canonical server state when a party is created.
+        const privateDungeonHostile = EntityHandler.isPrivateClientSpawnDungeonHostile(levelName, props);
+        if (levelMap && !privateDungeonHostile) {
             levelMap.set(entityId, props);
         }
 
-        // Broadcast the normalized snapshot so remote clients receive canonical state.
-        EntityHandler.broadcastToLevel(client, EntityHandler.buildEntityFullUpdatePayload(props), props);
+        if (!privateDungeonHostile) {
+            // Broadcast the normalized snapshot so remote clients receive canonical state.
+            EntityHandler.broadcastToLevel(client, EntityHandler.buildEntityFullUpdatePayload(props), props);
+        }
 
         if (isPlayer && !client.playerSpawned) {
              client.playerSpawned = true;
@@ -4079,7 +3533,6 @@ export class EntityHandler {
         levelName = LevelConfig.normalizeLevelName(levelName) || levelName;
         EntityHandler.ensureJcMini1PartySharedScope(client, levelName, 'send_initial_level_entities');
         console.log(`[EntityHandler] Sending initial entities for ${levelName} to ${client.character?.name}`);
-        EntityHandler.dumpHostileAliasTable(getLevelScopeKey(levelName, client.levelInstanceId));
         
         let levelMap = EntityHandler.getLevelMap(levelName, client.levelInstanceId);
         if (!levelMap) {
@@ -4089,12 +3542,6 @@ export class EntityHandler {
                 console.log(`[EntityHandler] Skipping server NPC init for client-spawn level ${levelName}`);
             } else {
                 const npcs = NpcLoader.getNpcsForLevel(levelName);
-                const dungeonSpawnConfig = EntityHandler.getDungeonSpawnConfigForLog(levelName);
-                if (dungeonSpawnConfig) {
-                    console.log(
-                        `[DungeonSpawnServer] init level=${dungeonSpawnConfig.levelId || dungeonSpawnConfig.levelName} levelName=${dungeonSpawnConfig.levelName} dungeon="${dungeonSpawnConfig.dungeonName}" scope=${getLevelScopeKey(levelName, client.levelInstanceId)} enemies=${dungeonSpawnConfig.enemies.length} requiredForClear=${dungeonSpawnConfig.enemies.filter((enemy) => enemy.requiredForClear).length}`
-                    );
-                }
                 console.log(`[EntityHandler] Initializing ${npcs.length} NPCs for ${levelName}`);
 
                 for (const npc of npcs) {
@@ -4106,11 +3553,6 @@ export class EntityHandler {
                     };
                     EntityHandler.applyRuntimeDungeonEntityLevel(client, levelName, entityProps);
                     levelMap.set(npc.id, entityProps);
-                    if (dungeonSpawnConfig || (entityProps as any).generatedFromScript) {
-                        console.log(
-                            `[DungeonSpawnServer] spawn level=${dungeonSpawnConfig?.levelId || (entityProps as any).levelId || levelName} levelName=${dungeonSpawnConfig?.levelName || levelName} dungeon="${dungeonSpawnConfig?.dungeonName || (entityProps as any).dungeonName || levelName}" scope=${getLevelScopeKey(levelName, client.levelInstanceId)} canonicalId=${Math.round(Number(npc.id ?? 0))} spawnKey=${String((entityProps as any).spawnKey ?? '')} type=${String(entityProps.name ?? '')} room=${Number(entityProps.roomId ?? -1)} pos=${Math.round(Number(entityProps.x ?? 0))},${Math.round(Number(entityProps.y ?? 0))}`
-                        );
-                    }
                 }
             }
         }
@@ -4123,7 +3565,6 @@ export class EntityHandler {
         const clientSpawnLevel = EntityHandler.usesClientSpawn(levelName);
         const serverAuthorityHostiles = EntityHandler.usesServerAuthorityHostiles(levelName);
         const canonicalVisibleServerAuthority = EntityHandler.usesCanonicalVisibleServerAuthorityHostiles(levelName);
-        EntityHandler.logDungeonSpawnServerSnapshot(levelName, getLevelScopeKey(levelName, client.levelInstanceId), client, levelMap);
         if (clientSpawnLevel) {
             const removedCount = EntityHandler.pruneStaleServerNpcs(levelMap);
             if (removedCount > 0) {
@@ -4141,58 +3582,15 @@ export class EntityHandler {
             if (entityProps?.isPlayer) continue;
             if (EntityHandler.isEntityDead(entityProps)) continue;
             if (entityProps?.clientSpawned) continue;
+            if ((entityProps as any)?.serverOnlyObjective) continue;
             EntityHandler.normalizeServerAuthorityHostileState(levelName, entityProps);
             if (EntityHandler.isServerAuthorityHostileEntity(levelName, entityProps)) {
                 noteDungeonRunEntitySeen(client, id, entityProps);
                 const canonicalDead = Boolean((entityProps as any).dead) ||
                     Number(entityProps.entState ?? EntityState.ACTIVE) === EntityState.DEAD;
                 if (!canonicalVisibleServerAuthority) {
-                    logJcMini1Authority('joiner_enemy_snapshot', {
-                        entityId: id,
-                        localEntityId: EntityHandler.resolveEntityLocalId(client, id),
-                        name: entityProps.name,
-                        roomId: entityProps.roomId,
-                        entityLevel: entityProps.level,
-                        hp: Math.round(Number((entityProps as any).hp ?? 0)),
-                        maxHp: Math.round(Number((entityProps as any).maxHp ?? 0)),
-                        healthDelta: Math.round(Number(entityProps.healthDelta ?? 0)),
-                        dead: Boolean((entityProps as any).dead),
-                        entState: entityProps.entState,
-                        scope: getLevelScopeKey(levelName, client.levelInstanceId),
-                        viewer: client.character?.name ?? '',
-                        viewerToken: client.token,
-                        viewerRoomId: client.currentRoomId,
-                        playerLevel: Math.round(Number(client.character?.level ?? 0)),
-                        playerHp: Math.round(Number(client.authoritativeCurrentHp ?? 0)),
-                        playerMaxHp: Math.round(Number(client.authoritativeMaxHp ?? 0)),
-                        knownCanonical: client.knownEntityIds.has(id),
-                        visibleSnapshotSent: false,
-                        reason: canonicalDead ? 'dead_wait_for_proxy_cleanup' : 'live_wait_for_client_proxy'
-                    });
                     continue;
                 }
-                logJcMini1Authority('joiner_enemy_snapshot', {
-                    entityId: id,
-                    localEntityId: EntityHandler.resolveEntityLocalId(client, id),
-                    name: entityProps.name,
-                    roomId: entityProps.roomId,
-                    entityLevel: entityProps.level,
-                    hp: Math.round(Number((entityProps as any).hp ?? 0)),
-                    maxHp: Math.round(Number((entityProps as any).maxHp ?? 0)),
-                    healthDelta: Math.round(Number(entityProps.healthDelta ?? 0)),
-                    dead: Boolean((entityProps as any).dead),
-                    entState: entityProps.entState,
-                    scope: getLevelScopeKey(levelName, client.levelInstanceId),
-                    viewer: client.character?.name ?? '',
-                    viewerToken: client.token,
-                    viewerRoomId: client.currentRoomId,
-                    playerLevel: Math.round(Number(client.character?.level ?? 0)),
-                    playerHp: Math.round(Number(client.authoritativeCurrentHp ?? 0)),
-                    playerMaxHp: Math.round(Number(client.authoritativeMaxHp ?? 0)),
-                    knownCanonical: client.knownEntityIds.has(id),
-                    visibleSnapshotSent: false,
-                    reason: canonicalDead ? 'dead_wait_for_client_proxy_cleanup' : 'live_wait_for_client_proxy_bridge'
-                });
                 continue;
             }
             client.entities.set(id, { ...entityProps });
@@ -4215,18 +3613,6 @@ export class EntityHandler {
         if (levelMap) {
             for (const [entityId, entityProps] of Array.from(levelMap.entries())) {
                 const entityNameNorm = EntityHandler.normalizeIdentityName(entityProps?.name);
-                if (
-                    EntityHandler.isServerAuthorityHostileEntity(levelName, entityProps) &&
-                    (
-                        Math.max(0, Math.round(Number(entityProps?.ownerToken ?? 0))) === client.token ||
-                        Math.max(0, Math.round(Number(entityProps?.aiOwnerToken ?? 0))) === client.token ||
-                        Math.max(0, Math.round(Number(entityProps?.proxyOwnerToken ?? 0))) === client.token
-                    )
-                ) {
-                    console.log(
-                        `[MultiplayerSync][hostile-lifecycle-preserve-on-leave] scope=${getClientLevelScope(client)} canonicalId=${Math.max(0, Math.round(Number(entityId) || 0))} leavingToken=${client.token} dead=${Boolean(entityProps?.dead)} destroyed=${Boolean(entityProps?.destroyed)}`
-                    );
-                }
                 const isOwnedPlayer = Boolean(entityProps?.isPlayer) && (
                     (client.clientEntID > 0 && entityId === client.clientEntID) ||
                     (charNameNorm && entityNameNorm === charNameNorm)

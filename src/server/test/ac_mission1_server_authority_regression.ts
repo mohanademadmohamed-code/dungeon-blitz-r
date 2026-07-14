@@ -14,6 +14,7 @@ import { LootDepthRewardHandler } from '../handlers/LootDepthRewardHandler';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 import { BitReader } from '../network/protocol/bitReader';
 import { getLevelScopeKey } from '../core/LevelScope';
+import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
 
 type SentPacket = {
     id: number;
@@ -553,10 +554,11 @@ function testAcMission1ServerOwnedDragonKillDoesNotForceDungeonCompletion(): voi
         false,
         'server-owned AC_Mission1 dragon kill should not wait for a client-authored kill-state packet'
     );
+    DungeonCompletionSystem.noteEntityDefeated(scope, canonical);
     assert.equal(
-        (MissionHandler as any).shouldForceCompleteDungeonOnEnemyDefeat(scope, canonical),
+        DungeonCompletionSystem.evaluate(scope).ready,
         false,
-        'server-owned AC_Mission1 dragon at zero HP should not force dungeon completion'
+        'the non-required mini dragon must not satisfy AC_Mission1 completion'
     );
 }
 
@@ -609,9 +611,9 @@ async function testAcMission1GoldDragonDeathRewardsUnlocksWithoutCompleting(): P
         'server-owned AC_Mission1 dragon death should not schedule dungeon completion'
     );
     assert.equal(
-        String((rogue as any).pendingDungeonCompletionForceSharedScope ?? ''),
-        '',
-        'server-owned AC_Mission1 dragon death should not force shared dungeon completion for the instance'
+        DungeonCompletionSystem.evaluate(scope).reason,
+        'client_completion_signal_pending',
+        'the authored AC_Mission1 client-signal gate must remain pending after the boss dies'
     );
 }
 

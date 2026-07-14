@@ -16,7 +16,7 @@ import {
     isValidRegistrationPassword,
     normalizeAccountIdentifier
 } from '../auth/PasswordAuth';
-import { CONCURRENT_ACCOUNT_EMAIL_MESSAGE, LoginHandler } from '../handlers/LoginHandler';
+import { LoginHandler } from '../handlers/LoginHandler';
 
 function resolveContentDir(relativeContentPath: string): string {
     const candidates = [
@@ -57,6 +57,7 @@ export class StaticServer {
     private readonly selectedAssetVersion = 'cbp';
     private readonly flashVersion = this.selectedAssetVersion;
     private readonly gameVersion = this.selectedAssetVersion;
+    private readonly clientRevision = 'maintenance-command-1';
 
     private static shouldLog(): boolean {
         return process.env.DEBUG_STATIC_SERVER === '1';
@@ -103,17 +104,18 @@ export class StaticServer {
     }
 
     private getSelectedSwfUrl(): string {
-        return `/p/${this.selectedAssetVersion}/DungeonBlitz.swf?fv=${this.flashVersion}&gv=${this.gameVersion}`;
+        return `/p/${this.selectedAssetVersion}/DungeonBlitz.swf?fv=${this.flashVersion}&gv=${this.gameVersion}&clientrev=${this.clientRevision}`;
     }
 
     private getCanonicalSelectedSwfUrl(req?: Request): string {
         const params = new URLSearchParams();
         params.set('fv', this.flashVersion);
         params.set('gv', this.gameVersion);
+        params.set('clientrev', this.clientRevision);
 
         if (req) {
             for (const [key, rawValue] of Object.entries(req.query)) {
-                if (key === 'fv' || key === 'gv') {
+                if (key === 'fv' || key === 'gv' || key === 'clientrev') {
                     continue;
                 }
 
@@ -132,7 +134,8 @@ export class StaticServer {
 
     private isCanonicalSelectedSwfRequest(req: Request): boolean {
         return String(req.query.fv ?? '') === this.flashVersion &&
-            String(req.query.gv ?? '') === this.gameVersion;
+            String(req.query.gv ?? '') === this.gameVersion &&
+            String(req.query.clientrev ?? '') === this.clientRevision;
     }
 
     private normalizeLocale(value: unknown): 'en' | 'tr' | null {
@@ -193,8 +196,7 @@ export class StaticServer {
         const candidates = Array.from(GlobalState.clients).filter((client) =>
             this.normalizeRemoteAddress(client.socket.remoteAddress) === remoteAddress &&
             !client.authenticated &&
-            !client.socket.destroyed &&
-            client.socket.readyState === 'open'
+            GlobalState.isClientConnectionOpen(client)
         );
         const client = candidates[candidates.length - 1];
         if (!client) {
@@ -631,22 +633,6 @@ try {
                 console.log(`[DiscordOAuth] Linked Discord account to ${result.account.email}`);
                 res.type('text/html').send(
                     this.renderDiscordOAuthPage('Discord Linked', 'Discord linked successfully. Return to the game.')
-                );
-                return;
-            }
-
-            const activeConflict = await LoginHandler.findActiveAccountIdentityConflict(result.account);
-            if (activeConflict) {
-                console.warn(
-                    `[DiscordOAuth] Login rejected for ${result.account.email}: active session already uses this account email identity`
-                );
-                res.status(409).type('text/html').send(
-                    this.renderDiscordOAuthPage(
-                        'Account Already Open',
-                        CONCURRENT_ACCOUNT_EMAIL_MESSAGE,
-                        true,
-                        true
-                    )
                 );
                 return;
             }

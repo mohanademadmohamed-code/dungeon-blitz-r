@@ -1,6 +1,5 @@
 
 import { Client } from '../core/Client';
-import { DebugLogger } from '../core/Debug';
 import { BuildingID } from '../core/Enums';
 import { BitReader } from '../network/protocol/bitReader';
 import { BitBuffer } from '../network/protocol/bitBuffer';
@@ -35,11 +34,6 @@ export class BuildingHandler {
             return false;
         }
 
-        DebugLogger.logProgress('HomeVisit:buildingMutationBlocked', client, client.character, {
-            action,
-            host: client.craftTownHostCharacter?.name
-        });
-
         if (client.playerSpawned && client.currentLevel === 'CraftTown') {
             BuildingHandler.sendBuildingUpdate(client);
         }
@@ -66,10 +60,6 @@ export class BuildingHandler {
         }
 
         await BuildingHandler.saveCharacter(client);
-        DebugLogger.logProgress('BuildingCompletion:syncApplied', client, client.character, {
-            buildingId: completed.buildingId,
-            rank: completed.rank
-        });
 
         if (client.playerSpawned && client.currentLevel === 'CraftTown') {
             BuildingHandler.sendBuildingComplete(client, completed.buildingId, completed.rank);
@@ -131,9 +121,6 @@ export class BuildingHandler {
         }
 
         BuildingHandler.sendBuildingUpdate(client);
-        DebugLogger.logProgress('BuildingRefresh:spawn', client, client.character, {
-            reason: 'crafttown_spawn'
-        });
 
         for (const delayMs of BuildingHandler.CRAFT_TOWN_REFRESH_RETRY_DELAYS_MS) {
             const timer = setTimeout(() => {
@@ -160,22 +147,10 @@ export class BuildingHandler {
         const usedIdols = br.readMethod15();
 
         console.log(`[Building] Upgrade request: ID=${buildingId}, Rank=${targetRank}, Idols=${usedIdols}`);
-        DebugLogger.logProgress('BuildingUpgrade:request', client, client.character, {
-            buildingId,
-            targetRank,
-            usedIdols
-        });
 
         const statsByBuilding = BuildingHandler.asRecord(client.character.magicForge?.stats_by_building);
         const currentRank = Number(statsByBuilding[buildingId.toString()] ?? statsByBuilding[buildingId] ?? 0);
         if (buildingId > 0 && targetRank > 0 && currentRank >= targetRank) {
-            DebugLogger.logProgress('BuildingUpgrade:ignored', client, client.character, {
-                buildingId,
-                targetRank,
-                currentRank,
-                usedIdols,
-                reason: 'already_at_or_above_target_rank'
-            });
 
             if (client.playerSpawned && client.currentLevel === 'CraftTown') {
                 BuildingHandler.sendBuildingComplete(client, buildingId, currentRank);
@@ -186,12 +161,6 @@ export class BuildingHandler {
 
         const buildingDef = BuildingHandler.getBuildingDef(buildingId, targetRank);
         if (!buildingDef) {
-            DebugLogger.logProgress('BuildingUpgrade:rejected', client, client.character, {
-                buildingId,
-                targetRank,
-                usedIdols,
-                reason: 'missing_building_definition'
-            });
             return;
         }
 
@@ -202,28 +171,12 @@ export class BuildingHandler {
         if (usedIdols) {
             const idols = Number(client.character.mammothIdols ?? 0);
             if (idols < idolCost) {
-                DebugLogger.logProgress('BuildingUpgrade:rejected', client, client.character, {
-                    buildingId,
-                    targetRank,
-                    usedIdols,
-                    idolCost,
-                    idols,
-                    reason: 'not_enough_idols'
-                });
                 return;
             }
             client.character.mammothIdols = idols - idolCost;
         } else {
             const gold = Number(client.character.gold ?? 0);
             if (gold < goldCost) {
-                DebugLogger.logProgress('BuildingUpgrade:rejected', client, client.character, {
-                    buildingId,
-                    targetRank,
-                    usedIdols,
-                    goldCost,
-                    gold,
-                    reason: 'not_enough_gold'
-                });
                 return;
             }
             client.character.gold = gold - goldCost;
@@ -245,13 +198,6 @@ export class BuildingHandler {
 
         // Save
         await BuildingHandler.saveCharacter(client);
-        DebugLogger.logProgress('BuildingUpgrade:queued', client, client.character, {
-            buildingId,
-            targetRank,
-            readyTime,
-            goldCost: usedIdols ? 0 : goldCost,
-            idolCost: usedIdols ? idolCost : 0
-        });
 
         if (usedIdols) {
             BuildingHandler.sendPremiumPurchase(client, 'BuildingUpgrade', idolCost);
@@ -272,18 +218,10 @@ export class BuildingHandler {
         const idolCost = br.readMethod9();
 
         console.log(`[Building] SpeedUp request: Cost=${idolCost}`);
-        DebugLogger.logProgress('BuildingSpeedup:request', client, client.character, {
-            idolCost
-        });
 
         const upgrade = client.character.buildingUpgrade;
         if (!upgrade || !upgrade.buildingID) {
             const existingRank = BuildingHandler.getBuildingRank(client.character, 1);
-            DebugLogger.logProgress('BuildingSpeedup:ignored', client, client.character, {
-                idolCost,
-                reason: 'no_active_building_upgrade',
-                existingTomeRank: existingRank
-            });
 
             if (client.playerSpawned && client.currentLevel === 'CraftTown' && existingRank > 0) {
                 BuildingHandler.sendBuildingComplete(client, 1, existingRank);
@@ -314,11 +252,6 @@ export class BuildingHandler {
         client.character.buildingUpgrade = { buildingID: 0, rank: 0, ReadyTime: 0 };
         
         await BuildingHandler.saveCharacter(client);
-        DebugLogger.logProgress('BuildingSpeedup:applied', client, client.character, {
-            idolCost,
-            buildingId,
-            newRank
-        });
 
         BuildingHandler.sendPremiumPurchase(client, 'BuildingSpeedup', idolCost);
 
@@ -350,10 +283,6 @@ export class BuildingHandler {
 
         client.character.buildingUpgrade = { buildingID: 0, rank: 0, ReadyTime: 0 };
         await BuildingHandler.saveCharacter(client);
-        DebugLogger.logProgress('BuildingClaim:applied', client, client.character, {
-            buildingId,
-            rank
-        });
     }
 
     static async handleBuildingCancel(client: Client, _data: Buffer): Promise<void> {
@@ -366,10 +295,6 @@ export class BuildingHandler {
 
         client.character.buildingUpgrade = { buildingID: 0, rank: 0, ReadyTime: 0 };
         await BuildingHandler.saveCharacter(client);
-        DebugLogger.logProgress('BuildingCancel:applied', client, client.character, {
-            buildingId,
-            rank
-        });
 
         if (client.playerSpawned && client.currentLevel === 'CraftTown') {
             BuildingHandler.sendBuildingUpdate(client);

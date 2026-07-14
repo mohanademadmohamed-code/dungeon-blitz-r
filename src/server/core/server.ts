@@ -2,6 +2,7 @@ import * as net from 'net';
 import { Client } from './Client';
 import { PacketRouter } from '../network/packetRouter';
 import { Config } from './config';
+import { GlobalState } from './GlobalState';
 
 export class GameServer {
     private server: net.Server;
@@ -58,6 +59,7 @@ export class GameServer {
         socket.setNoDelay(true);
         socket.setKeepAlive(true);
         const client = new Client(socket, this.router);
+        GlobalState.clients.add(client);
         const addr = `${socket.remoteAddress}:${socket.remotePort}`;
         console.log(`[GameServer] Client connected: ${addr}`);
     }

@@ -13,7 +13,16 @@
   },
   {
     "email": "2@gmail.com",
-    "user_id": 4
+    "user_id": 4,
+    "passwordKdf": "scrypt",
+    "passwordSalt": "3n+yvbspQgkllP6qVNpaMw==",
+    "passwordHash": "U8hrCPiA7/TyS0vAc6rrweysuB5U8U4SUga72P7L8EAMAm1/bqjbr8ESa1MPECefcdD1jcTkmx1LdDVgv7O8Fg==",
+    "passwordParams": {
+      "N": 16384,
+      "r": 8,
+      "p": 1,
+      "keylen": 64
+    }
   },
   {
     "email": "cheeto@gmail.com",
@@ -33,7 +42,16 @@
   },
   {
     "email": "1@gmail.com",
-    "user_id": 9
+    "user_id": 9,
+    "passwordKdf": "scrypt",
+    "passwordSalt": "mE3vTEagIXw//NdnIOdlXQ==",
+    "passwordHash": "+HvRSZjUxHWD07WSWm268svWYbrrTTCaALfQzqRMPKrG6xxDtRog+rbyoATpJ6KU/rKrfJn/it30MeGsot+6Lg==",
+    "passwordParams": {
+      "N": 16384,
+      "r": 8,
+      "p": 1,
+      "keylen": 64
+    }
   },
   {
     "email": "tela@gmail.com",

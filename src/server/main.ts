@@ -11,6 +11,7 @@ import { CommandHandler } from './handlers/CommandHandler';
 import { LevelHandler } from './handlers/LevelHandler';
 import { SocialHandler } from './handlers/SocialHandler';
 import { LevelConfig } from './core/LevelConfig';
+import { DungeonCompletionConditions } from './core/DungeonCompletionConditions';
 import { CharacterTemplates } from './core/CharacterTemplates';
 import { PetConfig } from './core/PetConfig';
 import { TalentHandler } from './handlers/TalentHandler';
@@ -33,7 +34,6 @@ import { LootDepthRewardHandler } from './handlers/LootDepthRewardHandler';
 import { EquipmentHandler } from './handlers/EquipmentHandler';
 import { GearSetHandler } from './handlers/GearSetHandler';
 import { AbilityHandler } from './handlers/AbilityHandler';
-import { DebugLogger } from './core/Debug';
 import { GuildHandler } from './handlers/GuildHandler';
 import { ForgeHandler } from './handlers/ForgeHandler';
 import { PetHandler } from './handlers/PetHandler';
@@ -43,36 +43,6 @@ import { JsonAdapter } from './database/JsonAdapter';
 import * as path from 'path';
 
 import { StaticServer } from './core/StaticServer';
-
-type DungeonCompletionPatchTarget = {
-    DUNGEONS_REQUIRING_BOSS_DEFEAT?: Set<string>;
-    REQUIRED_DUNGEON_BOSS_NAMES_BY_LEVEL?: Record<string, ReadonlySet<string>>;
-    DUNGEONS_WHERE_CLIENT_COMPLETION_RELEASES_POST_DEATH_CUTSCENE?: Set<string>;
-};
-
-function applyDungeonCompletionPatches(): void {
-    const missionHandler = MissionHandler as unknown as DungeonCompletionPatchTarget;
-
-    missionHandler.DUNGEONS_REQUIRING_BOSS_DEFEAT?.add('SRN_Mission3');
-    missionHandler.DUNGEONS_REQUIRING_BOSS_DEFEAT?.add('SRN_Mission3Hard');
-    missionHandler.DUNGEONS_REQUIRING_BOSS_DEFEAT?.add('GhostBossDungeon');
-    missionHandler.DUNGEONS_REQUIRING_BOSS_DEFEAT?.add('GhostBossDungeonHard');
-
-    missionHandler.DUNGEONS_WHERE_CLIENT_COMPLETION_RELEASES_POST_DEATH_CUTSCENE?.add('GhostBossDungeon');
-    missionHandler.DUNGEONS_WHERE_CLIENT_COMPLETION_RELEASES_POST_DEATH_CUTSCENE?.add('GhostBossDungeonHard');
-
-    const requiredBossNames = missionHandler.REQUIRED_DUNGEON_BOSS_NAMES_BY_LEVEL;
-    if (!requiredBossNames) {
-        return;
-    }
-
-    requiredBossNames.SRN_Mission3 = new Set(['YoungDragonGreen']);
-    requiredBossNames.SRN_Mission3Hard = new Set(['YoungDragonGreenHard']);
-    requiredBossNames.GhostBossDungeon = new Set(['NephitLargeEye']);
-    requiredBossNames.GhostBossDungeonHard = new Set(['NephitLargeEyeHard']);
-}
-
-applyDungeonCompletionPatches();
 
 // Load Config
 const dataDir = path.join(Config.DATA_DIR, 'data');
@@ -85,8 +55,17 @@ MissionDialogueLoader.load(dataDir);
 NpcDialogueLoader.load(dataDir);
 DialogueTranslationLoader.load(dataDir);
 NpcLoader.load(dataDir);
+const dungeonCompletionConfigErrors = DungeonCompletionConditions.validate(LevelConfig.getDungeonLevelNames());
+if (dungeonCompletionConfigErrors.length) {
+    throw new Error(
+        `[DungeonCompletion] Invalid condition catalog:\n${dungeonCompletionConfigErrors.map((error) => `- ${error}`).join('\n')}`
+    );
+}
+console.log(
+    `[DungeonCompletion] Loaded ${DungeonCompletionConditions.getConfiguredLevelNames().length} conditions for ` +
+    `${LevelConfig.getDungeonLevelNames().length} runtime dungeons.`
+);
 console.log(`[Startup] ${ProjectInfo.name} v${ProjectInfo.version}`);
-DebugLogger.logStartup();
 discordSocialBridge.initialize();
 
 // Initialize Router

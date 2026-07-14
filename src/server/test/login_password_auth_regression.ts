@@ -24,6 +24,7 @@ type FakeClient = {
         remoteAddress: string;
         destroyed: boolean;
         readyState: string;
+        destroy: () => void;
     };
     userId: number | null;
     account: any;
@@ -63,7 +64,11 @@ function createFakeClient(remoteAddress: string = '127.0.0.1'): FakeClient {
         socket: {
             remoteAddress,
             destroyed: false,
-            readyState: 'open'
+            readyState: 'open',
+            destroy() {
+                this.destroyed = true;
+                this.readyState = 'closed';
+            }
         },
         userId: null,
         account: null,
@@ -281,7 +286,7 @@ async function testPasswordLoginAllowsPasswordOnlyAccount(accountsPath: string, 
     assert.equal(client.sentPackets.some((packet) => packet.id === 0x15), true, 'password-only login should send character list');
 }
 
-async function testConcurrentEmailIdentityFails(accountsPath: string, savesDir: string): Promise<void> {
+async function testConcurrentEmailIdentityAllowsCharacterList(accountsPath: string, savesDir: string): Promise<void> {
     const accounts = await readAccounts(accountsPath);
     accounts.push({
         email: 'active-primary@example.com',
@@ -306,10 +311,11 @@ async function testConcurrentEmailIdentityFails(accountsPath: string, savesDir: 
     }, null, 2));
 
     const activeClient = createFakeClient('127.0.0.2');
+    activeClient.socket.readyState = 'readOnly';
     activeClient.userId = 6;
-    activeClient.account = { email: 'active-primary@example.com', user_id: 6 };
+    activeClient.account = null;
     activeClient.authenticated = true;
-    activeClient.character = { name: 'AlreadyPlaying' };
+    activeClient.character = { name: 'SecondHero' };
     GlobalState.clients.add(activeClient as any);
 
     try {
@@ -319,22 +325,55 @@ async function testConcurrentEmailIdentityFails(accountsPath: string, savesDir: 
             buildLoginPacket('second-primary@example.com', 'second-password')
         );
 
-        assertLoginFailed(secondClient, 'concurrent shared Gmail identity login');
-        assert.equal(getLastPopupMessage(secondClient), CONCURRENT_ACCOUNT_EMAIL_MESSAGE);
+        assert.equal(secondClient.authenticated, true, 'concurrent shared Gmail identity login should authenticate the character-list client');
+        assert.equal(secondClient.userId, 7, 'concurrent login should use the new account user id');
+        assert.equal(secondClient.account.email, 'second-primary@example.com', 'concurrent login should attach the new account');
+        assert.deepEqual(secondClient.characters, [{ name: 'SecondHero', class: 'mage', gender: 'female', level: 1 }]);
+        assert.equal(secondClient.sentPackets.some((packet) => packet.id === 0x15), true, 'concurrent login should send character list');
+        assert.equal(secondClient.sentPackets.some((packet) => packet.id === 0x1B), false, 'concurrent login must not show the active-email popup');
+        assert.equal(activeClient.socket.destroyed, false, 'character-list login should not disconnect the old active session yet');
+        assert.equal(activeClient.socket.readyState, 'readOnly', 'character-list login should leave the old active socket open');
 
-        await LoginHandler.handleLoginAuthenticate(
+        const replacementOrder: string[] = [];
+        const originalDestroy = activeClient.socket.destroy.bind(activeClient.socket);
+        activeClient.socket.destroy = () => {
+            replacementOrder.push('old-disconnect');
+            originalDestroy();
+        };
+        (activeClient.socket as any).end = () => {
+            replacementOrder.push('old-end');
+        };
+        const originalSendBitBuffer = secondClient.sendBitBuffer.bind(secondClient);
+        secondClient.sendBitBuffer = (id: number, bb: BitBuffer) => {
+            if (id === 0x15) {
+                replacementOrder.push('character-list-reset');
+            }
+            if (id === 0x1B) {
+                replacementOrder.push('new-popup');
+            }
+            originalSendBitBuffer(id, bb);
+        };
+
+        const didReplaceActiveSession = await LoginHandler.replaceAndWarnActiveAccountIdentityConflicts(
             secondClient as any,
-            buildLoginPacket('second-primary@example.com', 'second-password')
+            secondClient.account,
+            'SecondHero'
         );
-        assert.equal(getPopupCount(secondClient), 2, 'repeated login button presses should resend the warning popup');
-        assert.equal(getLastPopupMessage(secondClient), CONCURRENT_ACCOUNT_EMAIL_MESSAGE);
+        assert.equal(didReplaceActiveSession, true, 'enter-game replacement should report the same-character active session conflict');
+        assert.equal(activeClient.socket.destroyed, true, 'enter-game replacement should disconnect the old active session');
+        assert.equal(activeClient.socket.readyState, 'closed', 'enter-game replacement should close the old active socket');
+        assert.deepEqual(
+            replacementOrder,
+            ['old-end', 'old-disconnect', 'new-popup'],
+            'enter-game replacement should disconnect the old session before warning the joining client'
+        );
+        assert.equal(getLastPopupMessage(secondClient), CONCURRENT_ACCOUNT_EMAIL_MESSAGE, 'enter-game replacement should warn the joining client after disconnecting the old session');
 
         await LoginHandler.handleLoginCreate(
             secondClient as any,
             buildLoginPacket('second-primary@example.com', 'x')
         );
-        assert.equal(getPopupCount(secondClient), 3, 'create button presses should also resend the active-email warning popup');
-        assert.equal(getLastPopupMessage(secondClient), CONCURRENT_ACCOUNT_EMAIL_MESSAGE);
+        assert.equal(getLastPopupMessage(secondClient), 'Create your account in Discord with /create-account.');
     } finally {
         GlobalState.clients.delete(activeClient as any);
     }
@@ -383,9 +422,17 @@ async function testStalePendingWorldIdentityDoesNotBlockLogin(accountsPath: stri
             buildLoginPacket('fresh-pending@example.com', 'fresh-password')
         );
 
-        assertLoginFailed(freshClient, 'fresh pending transfer lock');
-        assert.equal(getLastPopupMessage(freshClient), CONCURRENT_ACCOUNT_EMAIL_MESSAGE);
-        assert.equal(GlobalState.pendingWorld.has(freshToken), true, 'fresh pending transfer should stay available');
+        assert.equal(freshClient.authenticated, true, 'fresh pending transfer lock should not block character-list login');
+        assert.equal(freshClient.userId, 8, 'fresh pending login should set the account user id');
+        assert.equal(freshClient.sentPackets.some((packet) => packet.id === 0x15), true, 'fresh pending login should send character list');
+        assert.equal(freshClient.sentPackets.some((packet) => packet.id === 0x1B), false, 'fresh pending login must not show the active-email popup');
+        assert.equal(GlobalState.pendingWorld.has(freshToken), true, 'fresh pending transfer should stay available until character select');
+        assert.equal(GlobalState.pendingExtended.has(freshToken), true, 'fresh extended transfer marker should stay available until character select');
+        const didReplacePendingLock = await LoginHandler.replaceAndWarnActiveAccountIdentityConflicts(freshClient as any, freshClient.account, 'FreshPendingHero');
+        assert.equal(didReplacePendingLock, true, 'enter-game replacement should report the fresh pending transfer conflict');
+        assert.equal(GlobalState.pendingWorld.has(freshToken), false, 'fresh pending transfer should be cleared at enter-game replacement time');
+        assert.equal(GlobalState.pendingExtended.has(freshToken), false, 'fresh extended transfer marker should be cleared at enter-game replacement time');
+        assert.equal(getLastPopupMessage(freshClient), CONCURRENT_ACCOUNT_EMAIL_MESSAGE, 'enter-game replacement should warn after clearing pending transfer state');
 
         GlobalState.pendingWorld.set(staleToken, {
             userId: 9,
@@ -419,13 +466,13 @@ async function testStalePendingWorldIdentityDoesNotBlockLogin(accountsPath: stri
         assert.equal(staleClient.authenticated, true, 'stale pending transfer must not block login');
         assert.equal(staleClient.userId, 9, 'stale pending login should set the account user id');
         assert.equal(staleClient.sentPackets.some((packet) => packet.id === 0x15), true, 'stale pending login should send character list');
-        assert.equal(GlobalState.pendingWorld.has(staleToken), false, 'stale pending transfer should be pruned');
-        assert.equal(GlobalState.pendingExtended.has(staleToken), false, 'stale extended transfer marker should be pruned');
-        assert.equal(GlobalState.pendingTeleports.has(staleToken), false, 'stale pending teleport should be pruned');
-        assert.equal(GlobalState.houseVisits.has(staleToken), false, 'stale house visit should be pruned');
-        assert.equal(GlobalState.tokenChar.has(staleToken), false, 'stale token character entry should be pruned');
-        assert.equal(GlobalState.usedTransferTokens.has(staleToken), false, 'stale used transfer token should be pruned');
-        assert.equal(GlobalState.transferTokenAliases.has(staleAliasToken), false, 'stale transfer alias should be pruned');
+        assert.equal(GlobalState.pendingWorld.has(staleToken), true, 'stale pending transfer should stay untouched during character-list login');
+        assert.equal(GlobalState.pendingExtended.has(staleToken), true, 'stale extended transfer marker should stay untouched during character-list login');
+        assert.equal(GlobalState.pendingTeleports.has(staleToken), true, 'stale pending teleport should stay untouched during character-list login');
+        assert.equal(GlobalState.houseVisits.has(staleToken), true, 'stale house visit should stay untouched during character-list login');
+        assert.equal(GlobalState.tokenChar.has(staleToken), true, 'stale token character entry should stay untouched during character-list login');
+        assert.equal(GlobalState.usedTransferTokens.has(staleToken), true, 'stale used transfer token should stay untouched during character-list login');
+        assert.equal(GlobalState.transferTokenAliases.has(staleAliasToken), true, 'stale transfer alias should stay untouched during character-list login');
     } finally {
         GlobalState.pendingWorld.delete(freshToken);
         GlobalState.pendingExtended.delete(freshToken);
@@ -602,7 +649,7 @@ async function main(): Promise<void> {
         await testRetryAfterInvalidPassword();
         await testUnknownAndEmptyPasswordFail();
         await testPasswordLoginAllowsPasswordOnlyAccount(accountsPath, savesDir);
-        await testConcurrentEmailIdentityFails(accountsPath, savesDir);
+        await testConcurrentEmailIdentityAllowsCharacterList(accountsPath, savesDir);
         await testStalePendingWorldIdentityDoesNotBlockLogin(accountsPath, savesDir);
         await testDiscordLinkedAccountWithoutHashFails(LoginHandler.db);
         await testAliasResetPreservesSave(accountsPath, savesDir, expectedEmail);

@@ -51,22 +51,6 @@ function usesRequiredForClearProgress(levelScope: string | null | undefined, lev
     return false;
 }
 
-function logRequiredForClearProgress(
-    levelScope: string,
-    levelName: string | null | undefined,
-    totals: { total: number; defeated: number },
-    progress: number
-): void {
-    const config = getRequiredForClearProgressConfig(levelName);
-    if (!config) {
-        return;
-    }
-
-    console.log(
-        `[DungeonProgress] level=${config.levelId || config.levelName} levelName=${config.levelName} dungeon="${config.dungeonName}" scope=${levelScope} totalRequired=${totals.total} deadRequired=${totals.defeated} percent=${progress}`
-    );
-}
-
 export function usesSharedDungeonProgress(levelName: string | null | undefined): boolean {
     const normalizedLevel = LevelConfig.normalizeLevelName(levelName);
     return Boolean(normalizedLevel) &&
@@ -347,7 +331,6 @@ export function recomputeSharedDungeonProgress(levelScope: string | null | undef
         state.progress = totals.total > 0
             ? clampProgress(Math.floor((totals.defeated / totals.total) * 100))
             : 0;
-        logRequiredForClearProgress(scopeKey, levelName, totals, state.progress);
         refreshSharedDungeonLiveStats(state, scopeKey);
         return state;
     }
