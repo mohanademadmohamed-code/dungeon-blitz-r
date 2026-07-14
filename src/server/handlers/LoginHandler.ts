@@ -4,18 +4,32 @@ import { BitBuffer } from '../network/protocol/bitBuffer';
 import { Config } from '../core/config';
 import * as crypto from 'crypto';
 import { JsonAdapter } from '../database/JsonAdapter';
+import { UserAccount } from '../database/Database';
+import { GlobalState, PendingTransfer } from '../core/GlobalState';
+import {
+    isValidPasswordInput,
+    normalizeAccountIdentifier,
+    unmaskChallengeXorClientPassword,
+    verifyClientPasswordInput
+} from '../auth/PasswordAuth';
 
-const db = new JsonAdapter();
+const INVALID_CREDENTIALS_MESSAGE = "Invalid email or password";
+const DISCORD_ACCOUNT_CREATE_MESSAGE = "Create your account in Discord with /create-account.";
+const PASSWORD_NOT_SET_MESSAGE = "Set a password before using password login.";
+export const CONCURRENT_ACCOUNT_EMAIL_MESSAGE = "You already have an account open with this email address.";
+
+interface LoginPayload {
+    email: string;
+    password: string;
+}
 
 export class LoginHandler {
-    static async handleLoginVersion(client: Client, data: Buffer): Promise<void> {
-        // 0x11
-        await client.resetForLoginCycle('login version');
+    public static db: JsonAdapter = new JsonAdapter();
+    private static readonly discordOAuthAutoAuthenticatedClients = new WeakSet<Client>();
+    private static readonly DISCORD_OAUTH_CHARACTER_LIST_RETRY_MS = 500;
+    private static readonly PENDING_WORLD_LOGIN_LOCK_TTL_MS = 60 * 1000;
 
-        const br = new BitReader(data);
-        const version = br.readMethod9();
-        
-        // Generate Challenge
+    private static issueChallenge(client: Client): string {
         const sid = crypto.randomInt(0, 65536);
         const secret = Buffer.from(Config.SECRET, 'hex');
         const sidBytes = Buffer.alloc(2);
@@ -25,98 +39,319 @@ export class LoginHandler {
         const challenge = `${sid.toString(16).padStart(4, '0')}${digest}`;
         client.challengeStr = challenge;
 
-        console.log(`[Login] Version: ${version}, Challenge: ${challenge}`);
-
-        // Send 0x12
-        // payload = len(utf_bytes) + utf_bytes
-        // packet = 0x12 + len(payload) + payload
-        // But logic says: "payload = struct.pack('>H', len(utf_bytes)) + utf_bytes"
-        
         const challengeBuf = Buffer.from(challenge, 'utf-8');
         const payload = Buffer.alloc(2 + challengeBuf.length);
         payload.writeUInt16BE(challengeBuf.length, 0);
         challengeBuf.copy(payload, 2);
 
-        client.send(0x12, payload);
+        const send = (client as Client & { send?: (id: number, payload: Buffer) => void }).send;
+        if (typeof send === 'function') {
+            send.call(client, 0x12, payload);
+        }
+
+        return challenge;
+    }
+
+    private static parseLoginPayload(data: Buffer): LoginPayload | null {
+        try {
+            const br = new BitReader(data);
+            br.readMethod26(); // fbId
+            br.readMethod26(); // kongId
+            const email = normalizeAccountIdentifier(br.readMethod26());
+            const password = br.readMethod26();
+            br.readMethod26(); // legacyKey
+
+            if (!email || !isValidPasswordInput(password)) {
+                return null;
+            }
+
+            return { email, password };
+        } catch (err) {
+            console.warn(`[Login] Rejected malformed login payload: ${(err as Error).message}`);
+            return null;
+        }
+    }
+
+    private static clearFailedAuthState(client: Client): void {
+        client.userId = null;
+        client.account = null;
+        client.authenticated = false;
+        client.characters = [];
+        client.character = null;
+    }
+
+    private static isFreshPendingWorldLoginLock(entry: PendingTransfer, now: number = Date.now()): boolean {
+        const pendingSince = Number(entry.pendingSince ?? entry.playSessionStartedAt ?? 0);
+        if (!Number.isFinite(pendingSince) || pendingSince <= 0) {
+            return true;
+        }
+
+        return now - Math.round(pendingSince) <= LoginHandler.PENDING_WORLD_LOGIN_LOCK_TTL_MS;
+    }
+
+    private static clearStalePendingWorldLoginLock(token: number, entry: PendingTransfer, accountEmail: string): void {
+        GlobalState.pendingWorld.delete(token);
+        GlobalState.pendingExtended.delete(token);
+        GlobalState.pendingTeleports.delete(token);
+        GlobalState.tokenChar.delete(token);
+        GlobalState.usedTransferTokens.delete(token);
+        GlobalState.houseVisits.delete(token);
+        GlobalState.transferTokenAliases.delete(token);
+        for (const [aliasToken, targetToken] of Array.from(GlobalState.transferTokenAliases.entries())) {
+            if (targetToken === token) {
+                GlobalState.transferTokenAliases.delete(aliasToken);
+            }
+        }
+
+        const characterName = String(entry.character?.name ?? '').trim() || '(unknown)';
+        console.warn(
+            `[Login] Cleared stale pending world login lock for ${accountEmail} token=${token} character=${characterName}`
+        );
+    }
+
+    public static async findActiveAccountIdentityConflict(
+        account: UserAccount,
+        excludedClient?: Client | null
+    ): Promise<Client | true | null> {
+        const accountUserId = Math.max(0, Math.round(Number(account.user_id ?? 0)));
+        for (const session of GlobalState.getOpenClients()) {
+            if (session === excludedClient) {
+                continue;
+            }
+
+            const sessionUserId = Math.max(0, Math.round(Number(session.userId ?? 0)));
+            if (accountUserId > 0 && sessionUserId === accountUserId) {
+                return session;
+            }
+
+            if (GlobalState.accountsShareIdentity(session.account, account)) {
+                return session;
+            }
+
+            if (sessionUserId > 0) {
+                const sessionAccount = await LoginHandler.db.getAccountById(sessionUserId);
+                if (GlobalState.accountsShareIdentity(sessionAccount, account)) {
+                    return session;
+                }
+            }
+        }
+
+        const now = Date.now();
+        for (const [token, entry] of Array.from(GlobalState.pendingWorld.entries())) {
+            let matchesAccountIdentity = false;
+            if (accountUserId > 0 && entry.userId === accountUserId) {
+                matchesAccountIdentity = true;
+            } else if (GlobalState.accountsShareIdentity(entry.account, account)) {
+                matchesAccountIdentity = true;
+            } else if (entry.accountEmail && GlobalState.accountsShareIdentity({ email: entry.accountEmail }, account)) {
+                matchesAccountIdentity = true;
+            } else if (entry.userId > 0) {
+                const pendingAccount = await LoginHandler.db.getAccountById(entry.userId);
+                matchesAccountIdentity = GlobalState.accountsShareIdentity(pendingAccount, account);
+            }
+
+            if (!matchesAccountIdentity) {
+                continue;
+            }
+
+            if (LoginHandler.isFreshPendingWorldLoginLock(entry, now)) {
+                return true;
+            }
+
+            LoginHandler.clearStalePendingWorldLoginLock(token, entry, account.email);
+        }
+
+        return null;
+    }
+
+    private static async completeAuthentication(
+        client: Client,
+        account: UserAccount,
+        reason: string,
+        resetForLoginCycle: boolean = false,
+        sendCharacters: boolean = true
+    ): Promise<void> {
+        if (await LoginHandler.rejectIfAccountIdentityAlreadyOpen(client, account)) {
+            return;
+        }
+
+        if (resetForLoginCycle) {
+            await client.resetForLoginCycle(reason);
+        }
+
+        client.userId = account.user_id;
+        client.account = account;
+        client.authenticated = true;
+        client.characters = await LoginHandler.db.loadCharacters(account.user_id);
+
+        if (reason.startsWith('discord oauth')) {
+            LoginHandler.discordOAuthAutoAuthenticatedClients.add(client);
+        } else {
+            LoginHandler.discordOAuthAutoAuthenticatedClients.delete(client);
+        }
+
+        console.log(`[Login] Authenticated ${account.email}: ${reason}`);
+        if (sendCharacters) {
+            LoginHandler.sendCharacterList(client);
+        }
+    }
+
+    private static async rejectIfAccountIdentityAlreadyOpen(client: Client, account: UserAccount): Promise<boolean> {
+        const activeConflict = await LoginHandler.findActiveAccountIdentityConflict(account, client);
+        if (!activeConflict) {
+            return false;
+        }
+
+        LoginHandler.clearFailedAuthState(client);
+        console.warn(
+            `[Login] Authentication rejected for ${account.email}: active session already uses this account email identity`
+        );
+        LoginHandler.sendPopup(client, CONCURRENT_ACCOUNT_EMAIL_MESSAGE, false);
+        LoginHandler.issueChallenge(client);
+        return true;
+    }
+
+    private static scheduleDiscordOAuthCharacterListRetry(client: Client, account: UserAccount): void {
+        setTimeout(() => {
+            if (
+                client.socket.destroyed ||
+                client.socket.readyState !== 'open' ||
+                !client.authenticated ||
+                client.userId !== account.user_id
+            ) {
+                return;
+            }
+
+            console.log(`[Login] Sending delayed Discord OAuth character list for ${account.email}`);
+            LoginHandler.sendCharacterList(client);
+        }, LoginHandler.DISCORD_OAUTH_CHARACTER_LIST_RETRY_MS);
+    }
+
+    private static rejectLogin(
+        client: Client,
+        email: string,
+        reason: string,
+        publicMessage: string = INVALID_CREDENTIALS_MESSAGE
+    ): void {
+        LoginHandler.clearFailedAuthState(client);
+        console.warn(`[Login] Authentication failed for ${email || '(missing account id)'}: ${reason}`);
+        LoginHandler.sendPopup(client, publicMessage, false);
+        LoginHandler.issueChallenge(client);
+    }
+
+    static async handleLoginVersion(client: Client, data: Buffer): Promise<void> {
+        // 0x11
+        await client.resetForLoginCycle('login version');
+
+        const br = new BitReader(data);
+        const version = br.readMethod9();
+
+        const challenge = LoginHandler.issueChallenge(client);
+
+        console.log(`[Login] Version: ${version}, Challenge: ${challenge}`);
+
+        const pending = GlobalState.peekDiscordOAuthLogin(client.socket.remoteAddress);
+        if (pending) {
+            await LoginHandler.completeAuthentication(
+                client,
+                pending.account,
+                'discord oauth pending version',
+                false,
+                false
+            );
+            LoginHandler.scheduleDiscordOAuthCharacterListRetry(client, pending.account);
+            console.log(`[Login] Discord OAuth pending for ${pending.account.email}; delayed character list scheduled`);
+        }
     }
 
     static async handleLoginCreate(client: Client, data: Buffer): Promise<void> {
         // 0x13
         await client.resetForLoginCycle('login create');
 
-        const br = new BitReader(data);
-        const fbId = br.readMethod26();
-        const kongId = br.readMethod26();
-        const email = br.readMethod26().trim().toLowerCase();
-        const password = br.readMethod26();
-        const legacyKey = br.readMethod26();
-
-        console.log(`[Login] Create Account: ${email}`);
-        
-        // Create or Get User
-        // Note: Python logic just gets or creates. We should ideally verify logic.
-        // Assuming "Create" packet implies registration.
-        
-        // We'll mimic Python `get_or_create_user_id`
-        // Wait, `get_or_create_user_id` is used in `handle_login_create`.
-        
-        // NOTE: In a real app we'd hash passwords. Here we are following the Python "no-auth" logic mostly?
-        // Actually Python didn't check password in `handle_login_create`. It just creates.
-        
-        // TODO: We need to properly implement `get_or_create_user_id` logic inside DB adapter
-        // Currently `JsonAdapter.createAccount` does it.
-        
-        // However, `get_or_create_user_id` in Python:
-        // checks `Accounts.json`. If email exists -> return ID. Else -> Create.
-        // So it's idempotent.
-
-        // Is there a strict "Register" vs "Login"? 
-        // 0x13 is handle_login_create.
-        // 0x14 is handle_login_authenticate.
-        
-        let userId = await db.getAccountId(email);
-        if (!userId) {
-            userId = await db.createAccount(email);
+        const payload = LoginHandler.parseLoginPayload(data);
+        const email = payload?.email ?? '';
+        if (payload) {
+            const existingAccount = await LoginHandler.db.getAccount(email);
+            if (existingAccount && await LoginHandler.rejectIfAccountIdentityAlreadyOpen(client, existingAccount)) {
+                return;
+            }
         }
-        
-        client.userId = userId;
-        client.account = { email, user_id: userId };
-        client.authenticated = true;
-        client.characters = await db.loadCharacters(userId);
-
-        LoginHandler.sendCharacterList(client);
+        LoginHandler.rejectLogin(
+            client,
+            email,
+            'in-game account creation is disabled; Discord /create-account is required',
+            DISCORD_ACCOUNT_CREATE_MESSAGE
+        );
     }
 
     static async handleLoginAuthenticate(client: Client, data: Buffer): Promise<void> {
         // 0x14
-        await client.resetForLoginCycle('login authenticate');
-
-        const br = new BitReader(data);
-        const fbId = br.readMethod26();
-        const kongId = br.readMethod26();
-        const email = br.readMethod26().trim().toLowerCase();
-        const encPassword = br.readMethod26();
-        const legacyKey = br.readMethod26();
-
-        console.log(`[Login] Authenticate: ${email}`);
-
-        const userId = await db.getAccountId(email);
-
-        if (!userId) {
-            // Send Popup "Account not found"
-            LoginHandler.sendPopup(client, "Account not found", true);
+        const payload = LoginHandler.parseLoginPayload(data);
+        if (!payload) {
+            LoginHandler.rejectLogin(client, '', 'invalid login payload');
             return;
         }
 
-        // Validate password? Python `handle_login_authenticate` DOES NOT validate password!
-        // It just `load_accounts()` and checks if email exists.
-        
-        client.userId = userId;
-        client.account = { email, user_id: userId };
-        client.authenticated = true;
-        client.characters = await db.loadCharacters(userId);
+        const { email, password } = payload;
+        console.log(`[Login] Authenticate: ${email}`);
 
-        LoginHandler.sendCharacterList(client);
+        const account = await LoginHandler.db.getAccount(email);
+        if (!account) {
+            LoginHandler.rejectLogin(client, email, 'account not found');
+            return;
+        }
+
+        if (
+            client.authenticated &&
+            client.userId === account.user_id &&
+            LoginHandler.discordOAuthAutoAuthenticatedClients.has(client)
+        ) {
+            LoginHandler.discordOAuthAutoAuthenticatedClients.delete(client);
+            GlobalState.consumeDiscordOAuthLogin(client.socket.remoteAddress, email);
+            console.log(`[Login] Duplicate authenticate ignored for already-authenticated account ${account.email}`);
+            LoginHandler.sendCharacterList(client);
+            return;
+        }
+
+        const pending = GlobalState.consumeDiscordOAuthLogin(client.socket.remoteAddress, email);
+        if (pending && pending.account.user_id === account.user_id) {
+            await LoginHandler.completeAuthentication(
+                client,
+                pending.account,
+                'discord oauth pending authenticate',
+                true
+            );
+            return;
+        }
+
+        // The Flash client XORs the password digest with the login challenge
+        // before sending; try the unmasked digest first, then the raw input so
+        // plain-digest/plaintext flows (tests, non-Flash tools) keep working.
+        const unmaskedPassword = unmaskChallengeXorClientPassword(password, client.challengeStr);
+        let passwordMatches = false;
+        try {
+            passwordMatches = await verifyClientPasswordInput(unmaskedPassword, account);
+            if (!passwordMatches && unmaskedPassword !== password) {
+                passwordMatches = await verifyClientPasswordInput(password, account);
+            }
+        } catch (err) {
+            console.warn(`[Login] Password verification error for ${email}: ${(err as Error).message}`);
+        }
+
+        if (!passwordMatches) {
+            const reason = account.passwordHash
+                ? 'password mismatch'
+                : 'Account exists but has no password hash; password setup required';
+            LoginHandler.rejectLogin(
+                client,
+                email,
+                reason,
+                account.passwordHash ? INVALID_CREDENTIALS_MESSAGE : PASSWORD_NOT_SET_MESSAGE
+            );
+            return;
+        }
+
+        await LoginHandler.completeAuthentication(client, account, 'login authenticate', true);
     }
 
     static sendCharacterList(client: Client): void {
