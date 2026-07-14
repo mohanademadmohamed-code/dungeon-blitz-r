@@ -4,6 +4,7 @@ import { Client, clearClientSpawnFallbackTimer, createKeepTutorialState } from '
 import { BitReader } from '../network/protocol/bitReader';
 import { DeadHostileTombstone, GlobalState } from '../core/GlobalState';
 import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
+import { DungeonCompletionConditions } from '../core/DungeonCompletionConditions';
 import { Entity, EntityProps, EntityState, EntityTeam } from '../core/Entity';
 import { LevelConfig } from '../core/LevelConfig';
 import { GameData } from '../core/GameData';
@@ -1785,7 +1786,15 @@ export class EntityHandler {
     }
 
     private static isPartySharedClientSpawnHostile(levelName: string | null | undefined, entity: any): boolean {
-        return EntityHandler.isSharedClientSpawnRegionActor(levelName, entity) && Number(entity?.team ?? 0) === 2;
+        return EntityHandler.isSharedClientSpawnRegionActor(levelName, entity) &&
+            Number(entity?.team ?? 0) === 2 &&
+            DungeonCompletionConditions.sharesClientHostileWithParty(levelName, entity);
+    }
+
+    private static isPrivateClientSpawnDungeonHostile(levelName: string | null | undefined, entity: any): boolean {
+        return EntityHandler.isSharedClientSpawnRegionActor(levelName, entity) &&
+            Number(entity?.team ?? 0) === EntityTeam.ENEMY &&
+            !DungeonCompletionConditions.sharesClientHostileWithParty(levelName, entity);
     }
 
     private static findLeaderAuthoritativeClientSpawnMatch(
@@ -2016,6 +2025,7 @@ export class EntityHandler {
             !levelMap ||
             !LevelConfig.isDungeonLevel(levelName) ||
             EntityHandler.usesServerAuthorityHostiles(levelName) ||
+            EntityHandler.isPrivateClientSpawnDungeonHostile(levelName, entity) ||
             !entity ||
             entity.isPlayer ||
             Number(entity.team ?? 0) !== EntityTeam.ENEMY
@@ -2411,7 +2421,12 @@ export class EntityHandler {
         levelMap: Map<number, any> | null,
         entity: any
     ): boolean {
-        if (!levelName || !levelMap || !EntityHandler.isSharedClientSpawnRegionActor(levelName, entity)) {
+        if (
+            !levelName ||
+            !levelMap ||
+            !EntityHandler.isSharedClientSpawnRegionActor(levelName, entity) ||
+            EntityHandler.isPrivateClientSpawnDungeonHostile(levelName, entity)
+        ) {
             return false;
         }
 
@@ -2496,7 +2511,10 @@ export class EntityHandler {
     }
 
     static shouldRelayEntityToOtherClients(levelName: string | null | undefined, entity: any): boolean {
-        if (EntityHandler.isPrivateClientSpawnOutdoorEntity(levelName, entity)) {
+        if (
+            EntityHandler.isPrivateClientSpawnOutdoorEntity(levelName, entity) ||
+            EntityHandler.isPrivateClientSpawnDungeonHostile(levelName, entity)
+        ) {
             return false;
         }
 
@@ -3485,13 +3503,17 @@ export class EntityHandler {
         noteDungeonRunEntitySeen(client, entityId, props);
         EntityHandler.rememberEntityKnown(client, levelName, props);
 
-        // Update GlobalState
-        if (levelMap) {
+        // Client-private dungeon hostiles remain local to their authored client.
+        // They must never become canonical server state when a party is created.
+        const privateDungeonHostile = EntityHandler.isPrivateClientSpawnDungeonHostile(levelName, props);
+        if (levelMap && !privateDungeonHostile) {
             levelMap.set(entityId, props);
         }
 
-        // Broadcast the normalized snapshot so remote clients receive canonical state.
-        EntityHandler.broadcastToLevel(client, EntityHandler.buildEntityFullUpdatePayload(props), props);
+        if (!privateDungeonHostile) {
+            // Broadcast the normalized snapshot so remote clients receive canonical state.
+            EntityHandler.broadcastToLevel(client, EntityHandler.buildEntityFullUpdatePayload(props), props);
+        }
 
         if (isPlayer && !client.playerSpawned) {
              client.playerSpawned = true;

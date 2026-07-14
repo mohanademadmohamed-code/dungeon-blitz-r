@@ -11,6 +11,7 @@ import { MissionLoader } from '../data/MissionLoader';
 import { NpcLoader } from '../data/NpcLoader';
 import { MissionID } from '../data/runtime';
 import { LevelHandler } from '../handlers/LevelHandler';
+import { EntityHandler } from '../handlers/EntityHandler';
 import { MissionHandler } from '../handlers/MissionHandler';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 
@@ -185,6 +186,32 @@ function buildRoomBossInfoPayload(roomId: number, bossId: number, bossName: stri
     return bb.toBuffer();
 }
 
+function buildHostileFullUpdate(entityId: number, name: string, roomId: number): Buffer {
+    const payload = (EntityHandler as any).buildEntityFullUpdatePayload({
+        id: entityId,
+        name,
+        isPlayer: false,
+        x: 1500,
+        y: 900,
+        v: 0,
+        team: EntityTeam.ENEMY,
+        renderDepthOffset: 0,
+        characterName: '',
+        dramaAnim: '',
+        sleepAnim: '',
+        summonerId: 0,
+        powerId: 0,
+        entState: EntityState.ACTIVE,
+        facingLeft: false,
+        running: false,
+        jumping: false,
+        dropping: false,
+        backpedal: false,
+        roomId
+    });
+    return Buffer.concat([payload, Buffer.from([0])]);
+}
+
 function packetCount(client: FakeClient, packetId: number): number {
     return client.sentPackets.filter((packet) => packet.id === packetId).length;
 }
@@ -201,10 +228,59 @@ function resetFor(client: FakeClient): void {
     DungeonCompletionSystem.reset(scope);
     GlobalState.dungeonCutscenes.clear();
     GlobalState.sessionsByToken.clear();
+    GlobalState.partyGroups.clear();
+    GlobalState.partyByMember.clear();
     if (client.pendingDungeonCompletionTimer) {
         clearTimeout(client.pendingDungeonCompletionTimer);
         client.pendingDungeonCompletionTimer = null;
     }
+}
+
+function testPartyLeaderSideEnemiesRemainClientPrivate(): void {
+    const leader = createFakeClient('PartyLeader', 61006);
+    const member = createFakeClient('PartyMember', 61007);
+    resetFor(leader);
+    member.levelInstanceId = leader.levelInstanceId;
+    GlobalState.sessionsByToken.set(leader.token, leader as never);
+    GlobalState.sessionsByToken.set(member.token, member as never);
+    GlobalState.partyGroups.set(900, {
+        id: 900,
+        leader: leader.character.name,
+        members: [leader.character.name, member.character.name],
+        locked: false
+    });
+    GlobalState.partyByMember.set('partyleader', 900);
+    GlobalState.partyByMember.set('partymember', 900);
+
+    const sideEnemyId = 7001001;
+    EntityHandler.handleEntityFullUpdate(
+        leader as never,
+        buildHostileFullUpdate(sideEnemyId, 'GoblinDagger', 2)
+    );
+
+    const localSideEnemy = leader.entities.get(sideEnemyId);
+    assert.equal(localSideEnemy?.clientSpawned, true, 'party leader side enemy must remain client-owned');
+    assert.equal(localSideEnemy?.hybridCanonicalHostile, undefined, 'side enemy must not become a server canonical');
+    assert.equal(
+        GlobalState.levelEntities.get(getClientLevelScope(leader as never))?.has(sideEnemyId) ?? false,
+        false,
+        'party leader side enemy must not enter authoritative shared dungeon state'
+    );
+    assert.equal(
+        EntityHandler.shouldMirrorClientSpawnEntityToParty('TutorialDungeon', localSideEnemy),
+        false,
+        'side enemy must not be mirrored through the party server path'
+    );
+    assert.equal(packetCount(member, 0x08), 0, 'side enemy must not be spawned for another party member');
+    assert.equal(
+        EntityHandler.shouldMirrorClientSpawnEntityToParty('TutorialDungeon', {
+            ...localSideEnemy,
+            id: TutorialDungeonMechanics.TAG_UGO_BOSS_ID,
+            name: 'GoblinBoss1'
+        }),
+        true,
+        'Tag Ugo must remain the only party-shared hostile'
+    );
 }
 
 function testOnlyTagUgoIsServerSpawned(): void {
@@ -311,6 +387,7 @@ function testBossIntroAndThresholdsAreServerTracked(): void {
 async function main(): Promise<void> {
     ensureDataLoaded();
     testOnlyTagUgoIsServerSpawned();
+    testPartyLeaderSideEnemiesRemainClientPrivate();
     await testBossDefeatWaitsForAnnaChain();
     await testAnnaChainCompletesAfterBoss();
     testScriptedObjectiveStateIsIdempotent();
