@@ -351,9 +351,9 @@ async function testTutorialBoatLiveBossRoomCombat(): Promise<void> {
     const localBossId = 7690967;
     EntityHandler.handleEntityFullUpdate(
         client as never,
-        buildHostileFullUpdate(localBossId, 'IntroKraken', Number(boss.x), Number(boss.y), liveBossRoomId)
+        buildHostileFullUpdate(localBossId, 'Colossal War Kraken', Number(boss.x), Number(boss.y), liveBossRoomId)
     );
-    assert.equal(EntityHandler.resolveEntityAlias(client as never, localBossId), boss.id, 'live Kraken cue must alias to canonical IntroKraken');
+    assert.equal(EntityHandler.resolveEntityAlias(client as never, localBossId), boss.id, 'display-name Kraken cue must alias to canonical IntroKraken');
 
     (client as any).activeDungeonCutsceneScope = scope;
     (client as any).activeDungeonCutsceneRoomId = liveBossRoomId;
@@ -383,6 +383,37 @@ async function testTutorialBoatLiveBossRoomCombat(): Promise<void> {
     const playerHpBefore = client.authoritativeCurrentHp;
     await CombatHandler.handlePowerHit(client as never, buildPowerHitPayload(client.clientEntID, localBossId, 25));
     assert.equal(client.authoritativeCurrentHp, playerHpBefore - 25, 'Kraken damage must reduce authoritative player HP');
+}
+
+async function testNephitDisplayNameProxyCombat(): Promise<void> {
+    const levelName = 'AC_Mission6';
+    const client = createFakeClient(levelName, 'nephit-display-name-proxy', 56008);
+    client.currentRoomId = 7;
+    client.character.CurrentLevel = { name: levelName, x: 13127, y: 297 };
+    attachPlayer(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+    EntityHandler.sendInitialLevelEntities(client as never, levelName);
+
+    const scope = getLevelScopeKey(levelName, client.levelInstanceId);
+    const levelMap = GlobalState.levelEntities.get(scope);
+    assert.ok(levelMap, 'Nephit dungeon must have a level entity map');
+    const boss = Array.from(levelMap.values()).find((entity) =>
+        EntityHandler.isServerAuthorityHostileEntity(levelName, entity) &&
+        String(entity?.name ?? '') === 'NephitLargeEye'
+    );
+    assert.ok(boss, 'Nephit dungeon must seed the final canonical Nephit boss');
+
+    const localBossId = 7690968;
+    EntityHandler.handleEntityFullUpdate(
+        client as never,
+        buildHostileFullUpdate(localBossId, 'Nephit', Number(boss.x), Number(boss.y), client.currentRoomId)
+    );
+    assert.equal(EntityHandler.resolveEntityAlias(client as never, localBossId), boss.id, 'Nephit display-name cue must alias to the final canonical boss');
+    assert.equal(levelMap.has(localBossId), false, 'Nephit display-name proxy must not create a duplicate hostile');
+
+    const hpBefore = Math.max(1, Math.round(Number(boss.hp ?? boss.maxHp ?? 1)));
+    await CombatHandler.handlePowerHit(client as never, buildPowerHitPayload(localBossId, client.clientEntID, 100));
+    assert.equal(Number(boss.hp), hpBefore - 100, 'player damage against the Nephit display-name proxy must reduce canonical boss HP');
 }
 
 async function testGoblinKidnappersConcurrentCanonicalDamage(): Promise<void> {
@@ -496,6 +527,10 @@ async function main(): Promise<void> {
         GlobalState.levelEntities.clear();
         GlobalState.sessionsByToken.clear();
         await testTutorialBoatLiveBossRoomCombat();
+
+        GlobalState.levelEntities.clear();
+        GlobalState.sessionsByToken.clear();
+        await testNephitDisplayNameProxyCombat();
 
         GlobalState.levelEntities.clear();
         GlobalState.sessionsByToken.clear();

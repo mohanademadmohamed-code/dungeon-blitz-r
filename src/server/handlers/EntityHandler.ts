@@ -77,7 +77,8 @@ export class EntityHandler {
     private static readonly LOST_AT_SEA_KRAKEN_PROXY_NAMES = new Set<string>([
         'introkraken',
         'krakenmain',
-        'krakenheavy'
+        'krakenheavy',
+        'colossalwarkraken'
     ]);
     private static readonly CANONICAL_VISIBLE_PROXY_MATCH_MAX_DISTANCE_SQ = 400 * 400;
     static readonly SERVER_AUTHORITY_ENTITY_LEVEL = 50;
@@ -879,6 +880,23 @@ export class EntityHandler {
         return normalized.endsWith('hard') ? normalized.slice(0, -4) : normalized;
     }
 
+    private static getServerAuthorityProxyNames(entity: any): Set<string> {
+        return new Set(
+            [
+                entity?.name,
+                entity?.EntName,
+                entity?.entName,
+                entity?.roomBossName,
+                entity?.displayName,
+                entity?.DisplayName,
+                entity?.characterName,
+                entity?.character_name
+            ]
+                .map((value) => EntityHandler.normalizeServerAuthorityProxyName(value))
+                .filter((value) => value.length > 0)
+        );
+    }
+
     private static isLostAtSeaKrakenProxy(levelName: string | null | undefined, entity: any): boolean {
         if ((LevelConfig.normalizeLevelName(getScopeLevelName(String(levelName ?? ''))) || '') !== 'TutorialBoat') {
             return false;
@@ -1003,7 +1021,12 @@ export class EntityHandler {
             if (!EntityHandler.isServerAuthorityHostileEntity(levelName, candidate)) {
                 continue;
             }
-            if (EntityHandler.normalizeServerAuthorityProxyName(candidate.name) !== proxyName) {
+            // Flash frequently replaces the authored entity type with the
+            // room-boss display name in its full-update cue (for example
+            // GreatNephit -> Nephit). Treat those exported display identities
+            // as aliases, then keep the existing position tie-breaker so
+            // multi-stage or same-name bosses resolve to the correct actor.
+            if (!EntityHandler.getServerAuthorityProxyNames(candidate).has(proxyName)) {
                 continue;
             }
 
