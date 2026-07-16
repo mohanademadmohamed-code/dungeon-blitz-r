@@ -227,6 +227,23 @@ const NEVER_ENDING_DUNGEON_LEVELS = [
     'JC_Mission9Hard'
 ] as const;
 
+const AUTHORED_ENDING_GATE_LEVELS = [
+    'OMM_Mission7',
+    'OMM_Mission7Hard',
+    'OMM_Mission8',
+    'OMM_Mission8Hard',
+    'OMM_Mission9',
+    'OMM_Mission9Hard',
+    'OMM_Mission11',
+    'OMM_Mission11Hard',
+    'EG_Mission1',
+    'EG_Mission1Hard',
+    'EG_Mission2',
+    'EG_Mission2Hard',
+    'EG_Mission3',
+    'EG_Mission3Hard'
+] as const;
+
 function satisfyObjectivesAfterIntroCutscene(
     scenario: Scenario,
     participantKey: string,
@@ -375,6 +392,71 @@ function verifyOverlappingAndReorderedCutscenes(): void {
     cleanupScenario(reordered);
 }
 
+function verifyAuthoredEndingGate(levelName: string, ordinal: number): void {
+    const scenario = createScenario(levelName, `authored-ending-${ordinal}`);
+    const baseTime = 8_000_000 + ordinal * 1_000;
+    assert.equal(
+        scenario.condition.cutscene?.requiredAfterObjectives,
+        true,
+        `${levelName}: authored defeat cinematic is not required by the completion catalog`
+    );
+
+    DungeonCompletionSystem.noteCutsceneStart(scenario.levelScope, 7, baseTime);
+    DungeonCompletionSystem.noteCutsceneEnd(scenario.levelScope, 7, baseTime + 1);
+    scenario.entities.forEach((entity, index) => defeatEntity(scenario, entity, baseTime + 10 + index));
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scenario.levelScope, baseTime + 30).ready,
+        false,
+        `${levelName}: intro cinematic incorrectly satisfied the post-boss ending gate`
+    );
+
+    DungeonCompletionSystem.noteCutsceneStart(scenario.levelScope, 7, baseTime + 31);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scenario.levelScope, baseTime + 32).ready,
+        false,
+        `${levelName}: completed while its authored defeat cinematic was active`
+    );
+    assert.equal(
+        DungeonCompletionSystem.noteCutsceneEnd(scenario.levelScope, 7, baseTime + 33),
+        true,
+        `${levelName}: did not complete after its authored defeat cinematic ended`
+    );
+    cleanupScenario(scenario);
+}
+
+function verifyGrowingFlameRequiresBothBosses(): void {
+    for (const levelName of ['OMM_Mission9', 'OMM_Mission9Hard']) {
+        const scenario = createScenario(levelName, 'double-boss');
+        assert.equal(scenario.entities.length, 2, `${levelName}: catalog does not expose both authored bosses`);
+        defeatEntity(scenario, scenario.entities[0], 9_000_000);
+        assert.equal(
+            DungeonCompletionSystem.evaluate(scenario.levelScope, 9_000_001).objectivesMet,
+            false,
+            `${levelName}: completed after only one member of the authored double-boss fight died`
+        );
+        cleanupScenario(scenario);
+    }
+}
+
+function verifyAshenMotherClientAuthorityAliases(): void {
+    for (const [levelName, expectedCanonical] of [
+        ['EG_Mission1', 'AshenDryadWizard'],
+        ['EG_Mission1Hard', 'AshenDryadWizardHard']
+    ] as const) {
+        const entity = { name: 'Ashen Mother', displayName: 'Ashen Mother', clientSpawned: true };
+        assert.equal(
+            DungeonCompletionConditions.getCanonicalBossName(levelName, entity),
+            expectedCanonical,
+            `${levelName}: Ashen Mother display alias did not resolve to the completion boss`
+        );
+        assert.equal(
+            DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity),
+            true,
+            `${levelName}: authored Ashen Mother client death is not accepted`
+        );
+    }
+}
+
 function main(): void {
     const dataDir = path.resolve(__dirname, '..', 'data');
     LevelConfig.load(dataDir);
@@ -395,6 +477,9 @@ function main(): void {
         verifyIntroCutsceneDoesNotPermanentlyBlockCompletion(levelName, index);
     });
     verifyOverlappingAndReorderedCutscenes();
+    AUTHORED_ENDING_GATE_LEVELS.forEach(verifyAuthoredEndingGate);
+    verifyGrowingFlameRequiresBothBosses();
+    verifyAshenMotherClientAuthorityAliases();
 
     assert.strictEqual(GlobalState.dungeonCompletions.size, 0, 'Matrix leaked dungeon completion states');
     console.log(

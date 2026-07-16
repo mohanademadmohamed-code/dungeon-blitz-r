@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import type express from 'express';
 import { StaticServer } from '../core/StaticServer';
 import { GlobalState } from '../core/GlobalState';
@@ -7,13 +7,92 @@ import { JsonAdapter } from '../database/JsonAdapter';
 import type { Character } from '../database/Database';
 
 const MAX_MAINTENANCE_WARNING_SECONDS = 86_400;
-const ADMIN_RATE_LIMIT_WINDOW_MS = 60_000;
-const ADMIN_RATE_LIMIT_MAX_REQUESTS = 30;
+const FAILED_AUTH_RATE_LIMIT_WINDOW_MS = 5 * 60_000;
+const FAILED_AUTH_RATE_LIMIT_MAX_REQUESTS = 10;
+const ADMIN_COMMAND_RATE_LIMIT_WINDOW_MS = 60_000;
+const MAINTENANCE_RATE_LIMIT_MAX_REQUESTS = 3;
+const IDOL_RATE_LIMIT_MAX_REQUESTS = 20;
+const IDOL_TARGET_RATE_LIMIT_MAX_REQUESTS = 5;
 const registeredApps = new WeakSet<express.Application>();
-const adminRateLimitEntries = new Map<string, { startedAt: number; count: number }>();
 const db = new JsonAdapter();
 
 type CharacterStore = Pick<JsonAdapter, 'loadCharacters' | 'saveCharacterSnapshot'>;
+
+export type AdminRateLimitResult = {
+    allowed: boolean;
+    limit: number;
+    remaining: number;
+    resetSeconds: number;
+    retryAfterSeconds: number;
+};
+
+export class DiscordAdminRateLimiter {
+    private readonly entries = new Map<string, { timestamps: number[]; windowMs: number }>();
+    private readonly maxKeys: number;
+
+    constructor(maxKeys: number = 1_000) {
+        this.maxKeys = Math.max(10, Math.round(Number(maxKeys) || 1_000));
+    }
+
+    consume(key: string, limit: number, windowMs: number, now: number = Date.now()): AdminRateLimitResult {
+        const normalizedKey = String(key || 'unknown');
+        const normalizedLimit = Math.max(1, Math.round(Number(limit) || 1));
+        const normalizedWindowMs = Math.max(1_000, Math.round(Number(windowMs) || 1_000));
+        const cutoff = now - normalizedWindowMs;
+        const current = this.entries.get(normalizedKey);
+        const timestamps = (current?.timestamps ?? []).filter((timestamp) => timestamp > cutoff);
+
+        if (!current && this.entries.size >= this.maxKeys) {
+            this.prune(now, true);
+        }
+
+        if (timestamps.length >= normalizedLimit) {
+            const retryAfterSeconds = Math.max(1, Math.ceil((timestamps[0] + normalizedWindowMs - now) / 1_000));
+            this.entries.set(normalizedKey, { timestamps, windowMs: normalizedWindowMs });
+            return {
+                allowed: false,
+                limit: normalizedLimit,
+                remaining: 0,
+                resetSeconds: retryAfterSeconds,
+                retryAfterSeconds
+            };
+        }
+
+        timestamps.push(now);
+        this.entries.set(normalizedKey, { timestamps, windowMs: normalizedWindowMs });
+        if (this.entries.size > this.maxKeys) {
+            this.prune(now, true);
+        }
+        const resetSeconds = Math.max(1, Math.ceil((timestamps[0] + normalizedWindowMs - now) / 1_000));
+        return {
+            allowed: true,
+            limit: normalizedLimit,
+            remaining: Math.max(0, normalizedLimit - timestamps.length),
+            resetSeconds,
+            retryAfterSeconds: 0
+        };
+    }
+
+    private prune(now: number, enforceSize: boolean): void {
+        for (const [key, entry] of this.entries) {
+            const cutoff = now - entry.windowMs;
+            entry.timestamps = entry.timestamps.filter((timestamp) => timestamp > cutoff);
+            if (entry.timestamps.length === 0) {
+                this.entries.delete(key);
+            }
+        }
+
+        if (!enforceSize || this.entries.size < this.maxKeys) {
+            return;
+        }
+        const oldest = [...this.entries.entries()]
+            .sort((left, right) => (left[1].timestamps.at(-1) ?? 0) - (right[1].timestamps.at(-1) ?? 0));
+        const removeCount = this.entries.size - this.maxKeys + 1;
+        for (let index = 0; index < removeCount; index++) {
+            this.entries.delete(oldest[index]?.[0] ?? '');
+        }
+    }
+}
 
 function readBearerToken(authorization: string | undefined): string {
     const value = String(authorization ?? '').trim();
@@ -29,62 +108,88 @@ function secretsMatch(provided: string, expected: string): boolean {
     return providedBuffer.length === expectedBuffer.length && timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
-function adminRateLimit(req: express.Request, res: express.Response, next: express.NextFunction): void {
-    const now = Date.now();
-    const key = String(req.socket.remoteAddress ?? 'unknown');
-    const current = adminRateLimitEntries.get(key);
-    const entry = !current || now - current.startedAt >= ADMIN_RATE_LIMIT_WINDOW_MS
-        ? { startedAt: now, count: 1 }
-        : { startedAt: current.startedAt, count: current.count + 1 };
-    adminRateLimitEntries.set(key, entry);
-
-    const remaining = Math.max(0, ADMIN_RATE_LIMIT_MAX_REQUESTS - entry.count);
-    const resetAt = Math.ceil((entry.startedAt + ADMIN_RATE_LIMIT_WINDOW_MS) / 1000);
-    res.setHeader('RateLimit-Limit', String(ADMIN_RATE_LIMIT_MAX_REQUESTS));
-    res.setHeader('RateLimit-Remaining', String(remaining));
-    res.setHeader('RateLimit-Reset', String(resetAt));
-
-    if (entry.count > ADMIN_RATE_LIMIT_MAX_REQUESTS) {
-        res.setHeader('Retry-After', String(Math.max(1, resetAt - Math.floor(now / 1000))));
-        res.status(429).json({ error: 'Too many admin requests.' });
-        return;
+function writeRateLimitHeaders(res: express.Response, result: AdminRateLimitResult): void {
+    res.setHeader('RateLimit-Limit', String(result.limit));
+    res.setHeader('RateLimit-Remaining', String(result.remaining));
+    res.setHeader('RateLimit-Reset', String(result.resetSeconds));
+    if (!result.allowed) {
+        res.setHeader('Retry-After', String(result.retryAfterSeconds));
     }
+}
 
-    if (adminRateLimitEntries.size > 1_000) {
-        for (const [entryKey, candidate] of adminRateLimitEntries) {
-            if (now - candidate.startedAt >= ADMIN_RATE_LIMIT_WINDOW_MS) {
-                adminRateLimitEntries.delete(entryKey);
+function getRemoteAddress(req: express.Request): string {
+    return String(req.socket.remoteAddress ?? req.ip ?? 'unknown').trim().toLowerCase() || 'unknown';
+}
+
+function getCredentialFingerprint(req: express.Request): string {
+    return createHash('sha256').update(readBearerToken(req.headers.authorization)).digest('hex').slice(0, 16);
+}
+
+function requireAdminAuthorization(limiter: DiscordAdminRateLimiter): express.RequestHandler {
+    return (req, res, next): void => {
+        const configuredSecret = String(process.env.DISCORD_MAINTENANCE_API_SECRET ?? '').trim();
+        if (!configuredSecret) {
+            res.status(503).json({ error: 'Discord admin API is not configured.' });
+            return;
+        }
+
+        const providedSecret = readBearerToken(req.headers.authorization);
+        if (providedSecret && secretsMatch(providedSecret, configuredSecret)) {
+            next();
+            return;
+        }
+
+        const result = limiter.consume(
+            `failed-auth:${getRemoteAddress(req)}`,
+            FAILED_AUTH_RATE_LIMIT_MAX_REQUESTS,
+            FAILED_AUTH_RATE_LIMIT_WINDOW_MS
+        );
+        writeRateLimitHeaders(res, result);
+        if (!result.allowed) {
+            res.status(429).json({ error: 'Too many failed admin authorization attempts.' });
+            return;
+        }
+        res.status(401).json({ error: 'Unauthorized.' });
+    };
+}
+
+function commandRateLimit(
+    limiter: DiscordAdminRateLimiter,
+    command: 'maintenance' | 'idols',
+    limit: number,
+    targetKey?: (req: express.Request) => string
+): express.RequestHandler {
+    return (req, res, next): void => {
+        const fingerprint = getCredentialFingerprint(req);
+        const commandResult = limiter.consume(
+            `command:${command}:${fingerprint}`,
+            limit,
+            ADMIN_COMMAND_RATE_LIMIT_WINDOW_MS
+        );
+        writeRateLimitHeaders(res, commandResult);
+        if (!commandResult.allowed) {
+            res.status(429).json({ error: `Too many ${command} admin requests.` });
+            return;
+        }
+
+        if (targetKey) {
+            const normalizedTarget = targetKey(req);
+            const targetResult = limiter.consume(
+                `target:${command}:${fingerprint}:${normalizedTarget}`,
+                IDOL_TARGET_RATE_LIMIT_MAX_REQUESTS,
+                ADMIN_COMMAND_RATE_LIMIT_WINDOW_MS
+            );
+            if (!targetResult.allowed || targetResult.remaining < commandResult.remaining) {
+                writeRateLimitHeaders(res, targetResult);
+            }
+            if (!targetResult.allowed) {
+                res.status(429).json({ error: 'Too many admin requests for this player character.' });
+                return;
             }
         }
-    }
 
-    next();
-}
-
-function requireAdminAuthorization(
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction
-): void {
-    if (isAuthorized(req, res)) {
         next();
-    }
-}
-
-function isAuthorized(req: express.Request, res: express.Response): boolean {
-    const configuredSecret = String(process.env.DISCORD_MAINTENANCE_API_SECRET ?? '').trim();
-    if (!configuredSecret) {
-        res.status(503).json({ error: 'Discord admin API is not configured.' });
-        return false;
-    }
-
-    const providedSecret = readBearerToken(req.headers.authorization);
-    if (!providedSecret || !secretsMatch(providedSecret, configuredSecret)) {
-        res.status(401).json({ error: 'Unauthorized.' });
-        return false;
-    }
-
-    return true;
+    };
 }
 
 function normalizeCharacterName(value: unknown): string {
@@ -221,81 +326,98 @@ export function registerDiscordMaintenanceApi(staticServer: StaticServer): void 
         return;
     }
     registeredApps.add(app);
+    const limiter = new DiscordAdminRateLimiter();
+    const authorize = requireAdminAuthorization(limiter);
 
-    app.post('/api/admin/maintenance', requireAdminAuthorization, adminRateLimit, (req, res) => {
-        res.setHeader('Cache-Control', 'no-store');
+    app.post(
+        '/api/admin/maintenance',
+        authorize,
+        commandRateLimit(limiter, 'maintenance', MAINTENANCE_RATE_LIMIT_MAX_REQUESTS),
+        (req, res) => {
+            res.setHeader('Cache-Control', 'no-store');
 
-        const body = req.body && typeof req.body === 'object'
-            ? req.body as Record<string, unknown>
-            : {};
-        const seconds = Number(body.seconds);
-        if (
-            !Number.isSafeInteger(seconds) ||
-            seconds < 1 ||
-            seconds > MAX_MAINTENANCE_WARNING_SECONDS
-        ) {
-            res.status(400).json({
-                error: `seconds must be an integer between 1 and ${MAX_MAINTENANCE_WARNING_SECONDS}.`
-            });
-            return;
-        }
-
-        const recipients = broadcastMaintenanceWarning(seconds);
-        console.log(`[MaintenanceAPI] Broadcast ${seconds}s warning to ${recipients} connected player(s).`);
-        res.json({ ok: true, seconds, recipients });
-    });
-
-    app.post('/api/admin/idols', requireAdminAuthorization, adminRateLimit, async (req, res) => {
-        res.setHeader('Cache-Control', 'no-store');
-
-        const body = req.body && typeof req.body === 'object'
-            ? req.body as Record<string, unknown>
-            : {};
-        const userId = Number(body.userId);
-        const characterName = String(body.characterName ?? '').trim();
-        const operation = String(body.operation ?? '') as 'add' | 'sub';
-        const amount = Number(body.amount);
-        if (
-            !Number.isSafeInteger(userId) ||
-            userId <= 0 ||
-            !characterName ||
-            (operation !== 'add' && operation !== 'sub') ||
-            !Number.isSafeInteger(amount) ||
-            amount <= 0
-        ) {
-            res.status(400).json({ error: 'Invalid userId, characterName, operation, or amount.' });
-            return;
-        }
-
-        try {
-            const result = await adjustMammothIdols(userId, characterName, operation, amount);
-            if (!result) {
-                res.status(404).json({ error: 'Player character was not found.' });
-                return;
-            }
-            if (result.onlineRecipients < 0) {
-                res.status(409).json({ error: 'The player does not have enough Mammoth Idols.' });
+            const body = req.body && typeof req.body === 'object'
+                ? req.body as Record<string, unknown>
+                : {};
+            const seconds = Number(body.seconds);
+            if (
+                !Number.isSafeInteger(seconds) ||
+                seconds < 1 ||
+                seconds > MAX_MAINTENANCE_WARNING_SECONDS
+            ) {
+                res.status(400).json({
+                    error: `seconds must be an integer between 1 and ${MAX_MAINTENANCE_WARNING_SECONDS}.`
+                });
                 return;
             }
 
-            console.log(
-                `[MaintenanceAPI] ${operation === 'add' ? 'Added' : 'Subtracted'} ${amount} Mammoth Idols ` +
-                `for ${characterName} (${userId}): ${result.before} -> ${result.after}; ` +
-                `onlineRecipients=${result.onlineRecipients}`
-            );
-            res.json({
-                ok: true,
-                userId,
-                characterName,
-                operation,
-                amount,
-                before: result.before,
-                after: result.after,
-                onlineRecipients: result.onlineRecipients
-            });
-        } catch (error) {
-            console.error('[MaintenanceAPI] Idol adjustment failed:', error);
-            res.status(500).json({ error: 'The Mammoth Idol adjustment failed.' });
+            const recipients = broadcastMaintenanceWarning(seconds);
+            console.log(`[MaintenanceAPI] Broadcast ${seconds}s warning to ${recipients} connected player(s).`);
+            res.json({ ok: true, seconds, recipients });
         }
-    });
+    );
+
+    app.post(
+        '/api/admin/idols',
+        authorize,
+        commandRateLimit(
+            limiter,
+            'idols',
+            IDOL_RATE_LIMIT_MAX_REQUESTS,
+            (req) => `${Math.max(0, Math.round(Number(req.body?.userId ?? 0)))}:${normalizeCharacterName(req.body?.characterName)}`
+        ),
+        async (req, res) => {
+            res.setHeader('Cache-Control', 'no-store');
+
+            const body = req.body && typeof req.body === 'object'
+                ? req.body as Record<string, unknown>
+                : {};
+            const userId = Number(body.userId);
+            const characterName = String(body.characterName ?? '').trim();
+            const operation = String(body.operation ?? '') as 'add' | 'sub';
+            const amount = Number(body.amount);
+            if (
+                !Number.isSafeInteger(userId) ||
+                userId <= 0 ||
+                !characterName ||
+                (operation !== 'add' && operation !== 'sub') ||
+                !Number.isSafeInteger(amount) ||
+                amount <= 0
+            ) {
+                res.status(400).json({ error: 'Invalid userId, characterName, operation, or amount.' });
+                return;
+            }
+
+            try {
+                const result = await adjustMammothIdols(userId, characterName, operation, amount);
+                if (!result) {
+                    res.status(404).json({ error: 'Player character was not found.' });
+                    return;
+                }
+                if (result.onlineRecipients < 0) {
+                    res.status(409).json({ error: 'The player does not have enough Mammoth Idols.' });
+                    return;
+                }
+
+                console.log(
+                    `[MaintenanceAPI] ${operation === 'add' ? 'Added' : 'Subtracted'} ${amount} Mammoth Idols ` +
+                    `for ${characterName} (${userId}): ${result.before} -> ${result.after}; ` +
+                    `onlineRecipients=${result.onlineRecipients}`
+                );
+                res.json({
+                    ok: true,
+                    userId,
+                    characterName,
+                    operation,
+                    amount,
+                    before: result.before,
+                    after: result.after,
+                    onlineRecipients: result.onlineRecipients
+                });
+            } catch (error) {
+                console.error('[MaintenanceAPI] Idol adjustment failed:', error);
+                res.status(500).json({ error: 'The Mammoth Idol adjustment failed.' });
+            }
+        }
+    );
 }

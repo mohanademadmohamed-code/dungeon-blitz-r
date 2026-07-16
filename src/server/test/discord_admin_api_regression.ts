@@ -1,7 +1,11 @@
 import { strict as assert } from 'assert';
 import type { Character } from '../database/Database';
 import { GlobalState } from '../core/GlobalState';
-import { adjustMammothIdols, broadcastMaintenanceWarning } from '../integrations/DiscordMaintenanceApi';
+import {
+    adjustMammothIdols,
+    broadcastMaintenanceWarning,
+    DiscordAdminRateLimiter
+} from '../integrations/DiscordMaintenanceApi';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 import { BitReader } from '../network/protocol/bitReader';
 
@@ -137,6 +141,62 @@ function testMaintenanceBroadcastAndChat(): void {
     assert.equal(closed.sentPackets.length, 0);
 }
 
+function testAdminRateLimits(): void {
+    const limiter = new DiscordAdminRateLimiter();
+    const windowMs = 60_000;
+    const startedAt = 1_000_000;
+
+    for (let index = 0; index < 3; index++) {
+        const result = limiter.consume('command:maintenance:credential', 3, windowMs, startedAt + index);
+        assert.equal(result.allowed, true, `maintenance request ${index + 1} was rejected early`);
+        assert.equal(result.remaining, 2 - index);
+    }
+    const maintenanceBlocked = limiter.consume('command:maintenance:credential', 3, windowMs, startedAt + 3);
+    assert.equal(maintenanceBlocked.allowed, false, 'fourth maintenance request bypassed its one-minute limit');
+    assert.equal(maintenanceBlocked.retryAfterSeconds, 60);
+    assert.equal(maintenanceBlocked.resetSeconds, 60, 'rate-limit reset must be seconds remaining, not an epoch');
+
+    const independentIdolCommand = limiter.consume('command:idols:credential', 20, windowMs, startedAt + 3);
+    assert.equal(independentIdolCommand.allowed, true, 'maintenance traffic consumed the Idol command bucket');
+
+    for (let index = 0; index < 5; index++) {
+        assert.equal(
+            limiter.consume('target:idols:credential:74:alpha', 5, windowMs, startedAt + index).allowed,
+            true,
+            `Idol target request ${index + 1} was rejected early`
+        );
+    }
+    assert.equal(
+        limiter.consume('target:idols:credential:74:alpha', 5, windowMs, startedAt + 5).allowed,
+        false,
+        'sixth Idol mutation for one character bypassed its target limit'
+    );
+    assert.equal(
+        limiter.consume('target:idols:credential:74:beta', 5, windowMs, startedAt + 5).allowed,
+        true,
+        'one character target bucket blocked a different character'
+    );
+
+    for (let index = 0; index < 10; index++) {
+        assert.equal(
+            limiter.consume('failed-auth:127.0.0.1', 10, 5 * windowMs, startedAt + index).allowed,
+            true,
+            `failed authorization attempt ${index + 1} was rejected early`
+        );
+    }
+    assert.equal(
+        limiter.consume('failed-auth:127.0.0.1', 10, 5 * windowMs, startedAt + 10).allowed,
+        false,
+        'failed authorization attempts were not rate-limited'
+    );
+
+    assert.equal(
+        limiter.consume('command:maintenance:credential', 3, windowMs, startedAt + windowMs + 1).allowed,
+        true,
+        'maintenance bucket did not recover after its sliding window expired'
+    );
+}
+
 async function main(): Promise<void> {
     try {
         GlobalState.sessionsByToken.clear();
@@ -149,6 +209,7 @@ async function main(): Promise<void> {
         await testInsufficientBalanceDoesNotSave();
         GlobalState.sessionsByToken.clear();
         testMaintenanceBroadcastAndChat();
+        testAdminRateLimits();
         console.log('Discord admin API regression checks passed.');
     } finally {
         GlobalState.sessionsByToken.clear();

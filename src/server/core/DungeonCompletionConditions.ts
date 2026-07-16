@@ -174,7 +174,8 @@ export class DungeonCompletionConditions {
         }
         const condition = DungeonCompletionConditions.get(levelName);
         const allowed = new Set((condition?.clientAuthorityBosses ?? []).map(normalizeIdentity));
-        return getEntityNames(entity).some((name) => allowed.has(normalizeIdentity(name)));
+        const canonical = DungeonCompletionConditions.getCanonicalBossName(levelName, entity);
+        return Boolean(canonical && allowed.has(normalizeIdentity(canonical)));
     }
 
     static getObjectiveRole(levelName: string | null | undefined, entity: any): string {
