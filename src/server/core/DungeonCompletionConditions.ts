@@ -13,7 +13,7 @@ type RawCatalog = {
 
 const catalog = rawConditions as RawCatalog;
 const VALID_MODES = new Set<DungeonCompletionMode>(['bosses', 'full-clear', 'client-signal', 'disabled']);
-const VALID_PARTY_HOSTILE_SYNC_POLICIES = new Set(['all', 'bosses-only']);
+const VALID_PARTY_HOSTILE_SYNC_POLICIES = new Set(['all', 'bosses-only', 'none']);
 
 function normalizeIdentity(value: unknown): string {
     return String(value ?? '')
@@ -84,6 +84,9 @@ export class DungeonCompletionConditions {
 
     static sharesClientHostileWithParty(levelName: string | null | undefined, entity: any): boolean {
         const condition = DungeonCompletionConditions.get(levelName);
+        if (condition?.partyHostileSync === 'none') {
+            return false;
+        }
         if (!condition || condition.partyHostileSync !== 'bosses-only') {
             return true;
         }

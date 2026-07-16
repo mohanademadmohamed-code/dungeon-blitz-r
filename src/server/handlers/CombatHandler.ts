@@ -126,7 +126,6 @@ export class CombatHandler {
     private static readonly recentPartySharedHostileHpApplies = new Map<string, number>();
     private static readonly recentTutorialBossHitPackets = new Map<string, number>();
     private static readonly SERVER_AUTHORITY_SYNC_LEVELS = new Set<string>([
-        'AC_Mission1',
         'JC_Mini1Hard',
         'TutorialDungeon'
     ]);

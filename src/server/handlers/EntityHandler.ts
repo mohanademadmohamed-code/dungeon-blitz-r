@@ -38,6 +38,8 @@ export class EntityHandler {
         'OldMineMountainHard',
         'EmeraldGlades',
         'EmeraldGladesHard',
+        'AC_Mission1',
+        'AC_Mission1Hard',
         'Castle',
         'CastleHard',
         'ShazariDesert',
@@ -53,14 +55,11 @@ export class EntityHandler {
         'GoblinRiverDungeonHard'
     ]);
     private static readonly SERVER_AUTHORITY_HOSTILE_LEVELS = new Set<string>([
-        'AC_Mission1',
         'JC_Mini1Hard',
         'JC_Mini2',
         'TutorialDungeon'
     ]);
-    private static readonly FIRST_SIGHT_SERVER_AUTHORITY_HOSTILE_LEVELS = new Set<string>([
-        'AC_Mission1'
-    ]);
+    private static readonly FIRST_SIGHT_SERVER_AUTHORITY_HOSTILE_LEVELS = new Set<string>();
     private static readonly CANONICAL_VISIBLE_PROXY_MATCH_MAX_DISTANCE_SQ = 400 * 400;
     static readonly SERVER_AUTHORITY_ENTITY_LEVEL = 50;
     private static readonly HOSTILE_BASE_HITPOINTS = [
