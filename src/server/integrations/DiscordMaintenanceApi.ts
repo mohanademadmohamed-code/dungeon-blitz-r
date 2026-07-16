@@ -13,6 +13,8 @@ const registeredApps = new WeakSet<express.Application>();
 const adminRateLimitEntries = new Map<string, { startedAt: number; count: number }>();
 const db = new JsonAdapter();
 
+type CharacterStore = Pick<JsonAdapter, 'loadCharacters' | 'saveCharacterSnapshot'>;
+
 function readBearerToken(authorization: string | undefined): string {
     const value = String(authorization ?? '').trim();
     if (value.length <= 7 || value.slice(0, 7).toLowerCase() !== 'bearer ') {
@@ -57,6 +59,16 @@ function adminRateLimit(req: express.Request, res: express.Response, next: expre
     }
 
     next();
+}
+
+function requireAdminAuthorization(
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+): void {
+    if (isAuthorized(req, res)) {
+        next();
+    }
 }
 
 function isAuthorized(req: express.Request, res: express.Response): boolean {
@@ -110,6 +122,7 @@ export function broadcastMaintenanceWarning(seconds: number): number {
     const warning = new BitBuffer(false);
     warning.writeMethod4(seconds);
     const payload = warning.toBuffer();
+    const announcement = `Server maintenance starts in ${seconds} second${seconds === 1 ? '' : 's'}.`;
     let recipients = 0;
 
     for (const session of GlobalState.sessionsByToken.values()) {
@@ -118,29 +131,35 @@ export function broadcastMaintenanceWarning(seconds: number): number {
         }
 
         session.send(0x101, payload);
+        const status = new BitBuffer(false);
+        status.writeMethod13(announcement);
+        session.sendBitBuffer(0x44, status);
         recipients += 1;
     }
 
     return recipients;
 }
 
-async function adjustMammothIdols(
+export async function adjustMammothIdols(
     userId: number,
     characterName: string,
     operation: 'add' | 'sub',
-    amount: number
+    amount: number,
+    store: CharacterStore = db
 ): Promise<{ before: number; after: number; onlineRecipients: number } | null> {
     const normalizedName = normalizeCharacterName(characterName);
     if (!Number.isSafeInteger(userId) || userId <= 0 || !normalizedName) {
         return null;
     }
 
-    const liveSessions = GlobalState.getActiveSessionsByUserId(userId).filter((session) =>
-        GlobalState.isClientConnectionOpen(session) &&
+    const accountSessions = GlobalState.getActiveSessionsByUserId(userId).filter((session) =>
+        GlobalState.isClientConnectionOpen(session)
+    );
+    const targetSessions = accountSessions.filter((session) =>
         normalizeCharacterName(session.character?.name) === normalizedName
     );
-    const storedCharacters = liveSessions.length > 0 ? [] : await db.loadCharacters(userId);
-    const authoritativeCharacter = liveSessions[0]?.character ?? storedCharacters.find((character) =>
+    const storedCharacters = await store.loadCharacters(userId);
+    const authoritativeCharacter = targetSessions[0]?.character ?? storedCharacters.find((character) =>
         normalizeCharacterName(character?.name) === normalizedName
     );
     if (!authoritativeCharacter) {
@@ -152,28 +171,48 @@ async function adjustMammothIdols(
         return { before, after: before, onlineRecipients: -1 };
     }
     const after = operation === 'add' ? before + amount : before - amount;
-    authoritativeCharacter.mammothIdols = after;
 
-    for (const session of liveSessions) {
-        if (!session.character) {
-            continue;
+    const mutatedCharacters = new Map<Character, number | undefined>();
+    const setBalance = (character: Character | null | undefined): void => {
+        if (!character || normalizeCharacterName(character.name) !== normalizedName) {
+            return;
         }
-        session.character.mammothIdols = after;
+        if (!mutatedCharacters.has(character)) {
+            mutatedCharacters.set(character, character.mammothIdols);
+        }
+        character.mammothIdols = after;
+    };
+
+    setBalance(authoritativeCharacter);
+    for (const session of accountSessions) {
+        setBalance(session.character);
         const listedCharacter = session.characters.find((character) =>
             normalizeCharacterName(character?.name) === normalizedName
         );
-        if (listedCharacter) {
-            listedCharacter.mammothIdols = after;
+        setBalance(listedCharacter);
+    }
+
+    let savedCharacters: Character[];
+    try {
+        savedCharacters = await store.saveCharacterSnapshot(userId, {
+            ...authoritativeCharacter,
+            mammothIdols: after
+        });
+    } catch (error) {
+        for (const [character, previousBalance] of mutatedCharacters) {
+            character.mammothIdols = previousBalance;
         }
+        throw error;
+    }
+
+    for (const session of accountSessions) {
+        session.characters = savedCharacters;
+    }
+    for (const session of targetSessions) {
         sendMammothIdolUpdate(session);
     }
 
-    const savedCharacters = await db.saveCharacterSnapshot(userId, authoritativeCharacter);
-    for (const session of liveSessions) {
-        session.characters = savedCharacters;
-    }
-
-    return { before, after, onlineRecipients: liveSessions.length };
+    return { before, after, onlineRecipients: targetSessions.length };
 }
 
 export function registerDiscordMaintenanceApi(staticServer: StaticServer): void {
@@ -183,11 +222,8 @@ export function registerDiscordMaintenanceApi(staticServer: StaticServer): void 
     }
     registeredApps.add(app);
 
-    app.post('/api/admin/maintenance', adminRateLimit, (req, res) => {
+    app.post('/api/admin/maintenance', requireAdminAuthorization, adminRateLimit, (req, res) => {
         res.setHeader('Cache-Control', 'no-store');
-        if (!isAuthorized(req, res)) {
-            return;
-        }
 
         const body = req.body && typeof req.body === 'object'
             ? req.body as Record<string, unknown>
@@ -209,11 +245,8 @@ export function registerDiscordMaintenanceApi(staticServer: StaticServer): void 
         res.json({ ok: true, seconds, recipients });
     });
 
-    app.post('/api/admin/idols', adminRateLimit, async (req, res) => {
+    app.post('/api/admin/idols', requireAdminAuthorization, adminRateLimit, async (req, res) => {
         res.setHeader('Cache-Control', 'no-store');
-        if (!isAuthorized(req, res)) {
-            return;
-        }
 
         const body = req.body && typeof req.body === 'object'
             ? req.body as Record<string, unknown>
