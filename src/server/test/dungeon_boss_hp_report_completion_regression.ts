@@ -1,0 +1,214 @@
+import { strict as assert } from 'assert';
+import * as path from 'path';
+import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
+import { EntityState, EntityTeam } from '../core/Entity';
+import { GameData } from '../core/GameData';
+import { GlobalState } from '../core/GlobalState';
+import { LevelConfig } from '../core/LevelConfig';
+import { getClientLevelScope } from '../core/LevelScope';
+import { CombatHandler } from '../handlers/CombatHandler';
+import { BitBuffer } from '../network/protocol/bitBuffer';
+
+type FakeClient = {
+    currentLevel: string;
+    levelInstanceId: string;
+    currentRoomId: number;
+    token: number;
+    userId: number;
+    playerSpawned: boolean;
+    clientEntID: number;
+    character: any;
+    entities: Map<number, any>;
+    entityIdAliases: Map<number, number>;
+};
+
+function buildHpDeltaPayload(entityId: number, amount: number): Buffer {
+    const bb = new BitBuffer(false);
+    bb.writeMethod4(entityId);
+    bb.writeMethod24(amount);
+    return bb.toBuffer();
+}
+
+function buildDestroyEntityPayload(entityId: number): Buffer {
+    const bb = new BitBuffer(false);
+    bb.writeMethod4(entityId);
+    bb.writeMethod15(true);
+    return bb.toBuffer();
+}
+
+function createClient(levelName: string, ordinal: number): FakeClient {
+    return {
+        currentLevel: levelName,
+        levelInstanceId: `boss-hp-report-${ordinal}`,
+        currentRoomId: 12,
+        token: 70_000 + ordinal,
+        userId: 80_000 + ordinal,
+        playerSpawned: true,
+        clientEntID: 90_000 + ordinal,
+        character: {
+            name: `BossHpReporter${ordinal}`,
+            CurrentLevel: { name: levelName, x: 0, y: 0 },
+            missions: {}
+        },
+        entities: new Map<number, any>(),
+        entityIdAliases: new Map<number, number>()
+    };
+}
+
+function createBoss(id: number, name: string): any {
+    return {
+        id,
+        name,
+        EntName: name,
+        characterName: `,${name}`,
+        character_name: `,${name}`,
+        isPlayer: false,
+        team: EntityTeam.ENEMY,
+        roomId: 12,
+        clientSpawned: true,
+        hp: 1000,
+        maxHp: 1000,
+        healthDelta: 0,
+        health_delta: 0,
+        dead: false,
+        destroyed: false,
+        entState: EntityState.ACTIVE
+    };
+}
+
+function seedBosses(client: FakeClient, bosses: any[]): string {
+    const scope = getClientLevelScope(client as never);
+    const levelMap = new Map<number, any>();
+    for (const boss of bosses) {
+        client.entities.set(boss.id, boss);
+        levelMap.set(boss.id, boss);
+    }
+    GlobalState.levelEntities.set(scope, levelMap);
+    return scope;
+}
+
+function clearRun(client: FakeClient): void {
+    const scope = getClientLevelScope(client as never);
+    DungeonCompletionSystem.reset(scope);
+    GlobalState.levelEntities.delete(scope);
+    GlobalState.levelQuestProgress.delete(scope);
+}
+
+function testDeathToMeylourHpReportAndCutsceneGate(levelName: string, bossName: string, ordinal: number): void {
+    const client = createClient(levelName, ordinal);
+    const boss = createBoss(10_000 + ordinal, bossName);
+    const scope = seedBosses(client, [boss]);
+
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -999));
+    assert.equal(boss.hp, 1000, `${levelName}: non-lethal client HP telemetry mutated canonical HP`);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).objectivesMet,
+        false,
+        `${levelName}: non-lethal client HP report completed the boss objective`
+    );
+
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -1000));
+    assert.equal(boss.hp, 0, `${levelName}: lethal required-boss HP report did not reach canonical state`);
+    assert.equal(boss.dead, true, `${levelName}: lethal required-boss HP report did not mark the boss dead`);
+    assert.equal(boss.clientDefeatVerified, true, `${levelName}: lethal boss report was not verified`);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).objectivesMet,
+        true,
+        `${levelName}: lethal boss report never reached dungeon completion`
+    );
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).ready,
+        false,
+        `${levelName}: completed before the authored Meylour defeat cutscene`
+    );
+
+    DungeonCompletionSystem.noteCutsceneStart(scope, boss.roomId, 2000 + ordinal);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope, 2100 + ordinal).ready,
+        false,
+        `${levelName}: completed while the authored defeat cutscene was active`
+    );
+    assert.equal(
+        DungeonCompletionSystem.noteCutsceneEnd(scope, boss.roomId, 2200 + ordinal),
+        true,
+        `${levelName}: did not become ready after the authored defeat cutscene ended`
+    );
+
+    clearRun(client);
+}
+
+function testMultiBossHpReportsRequireEveryBoss(): void {
+    const client = createClient('AC_Mission5Hard', 3);
+    const blackDragon = createBoss(10_103, 'AncientDragonBlackHard');
+    const silverDragon = createBoss(10_104, 'AncientDragonSilverHard');
+    const scope = seedBosses(client, [blackDragon, silverDragon]);
+
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(blackDragon.id, -1000));
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).ready,
+        false,
+        'multi-boss dungeon completed after only the first required boss HP report'
+    );
+
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(silverDragon.id, -1000));
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).ready,
+        true,
+        'multi-boss dungeon did not complete after every required boss HP report'
+    );
+
+    clearRun(client);
+}
+
+async function testContributedBossDestroyOverridesStaleCanonicalHp(): Promise<void> {
+    const client = createClient('OMM_Mission12Hard', 4);
+    const boss = createBoss(10_204, 'MagmaCyclopsBossHard');
+    const scope = seedBosses(client, [boss]);
+    const combatHandler = CombatHandler as any;
+    combatHandler.recordContribution(scope, boss.id, client, 250);
+
+    await CombatHandler.handleEntityDestroy(client as never, buildDestroyEntityPayload(boss.id));
+
+    assert.equal(boss.hp, 0, 'verified boss destroy did not override stale canonical HP');
+    assert.equal(boss.dead, true, 'verified boss destroy did not mark the canonical boss dead');
+    assert.equal(boss.destroyed, true, 'verified boss destroy did not finalize the canonical boss');
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).objectivesMet,
+        true,
+        'verified boss destroy never reached dungeon completion'
+    );
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).ready,
+        false,
+        'verified boss destroy bypassed the authored Meylour cutscene gate'
+    );
+
+    clearRun(client);
+    GlobalState.combatContributions.clear();
+}
+
+async function main(): Promise<void> {
+    const dataDir = path.resolve(__dirname, '../data');
+    LevelConfig.load(dataDir);
+    GameData.load(dataDir);
+
+    const combatHandler = CombatHandler as any;
+    const originalMissionWork = combatHandler.fireAndForgetMissionWork;
+    combatHandler.fireAndForgetMissionWork = (): void => undefined;
+    try {
+        testDeathToMeylourHpReportAndCutsceneGate('OMM_Mission12', 'MagmaCyclopsBoss', 1);
+        testDeathToMeylourHpReportAndCutsceneGate('OMM_Mission12Hard', 'MagmaCyclopsBossHard', 2);
+        testMultiBossHpReportsRequireEveryBoss();
+        await testContributedBossDestroyOverridesStaleCanonicalHp();
+    } finally {
+        combatHandler.fireAndForgetMissionWork = originalMissionWork;
+    }
+
+    assert.equal(GlobalState.dungeonCompletions.size, 0, 'boss HP report regression leaked completion state');
+    console.log('dungeon_boss_hp_report_completion_regression: ok');
+}
+
+void main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});

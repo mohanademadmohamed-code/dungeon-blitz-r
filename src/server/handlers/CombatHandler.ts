@@ -5122,10 +5122,14 @@ export class CombatHandler {
             const healthState = CombatHandler.resolveHostileHealthStateAcrossCopies(levelScope, destroyedEntity) ??
                 CombatHandler.getNpcHealthState(destroyedEntity);
             const canonicalHp = Math.max(0, Math.round(Number(destroyedEntity.hp ?? healthState?.currentHp ?? 0)));
+            const verifiedRequiredBossDestroy = Boolean(
+                contributionSnapshot?.contributors?.length &&
+                MissionHandler.shouldCompleteDungeonFromBossHpReport(client, destroyedEntity)
+            );
             if (Boolean(destroyedEntity.destroyed)) {
                 return;
             }
-            if (canonicalHp > 0) {
+            if (canonicalHp > 0 && !verifiedRequiredBossDestroy) {
                 destroyedEntity.dead = false;
                 if (Number(destroyedEntity.entState ?? EntityState.ACTIVE) === EntityState.DEAD) {
                     destroyedEntity.entState = EntityState.ACTIVE;
@@ -5148,6 +5152,15 @@ export class CombatHandler {
                     )
                 );
                 return;
+            }
+
+            if (verifiedRequiredBossDestroy && healthState) {
+                CombatHandler.syncHostileHealthCopies(levelScope, destroyedEntity, 0, healthState.maxHp);
+                for (const copy of CombatHandler.collectHostileHealthCopies(levelScope, destroyedEntity, true)) {
+                    copy.clientDefeatVerified = true;
+                    copy.playerDamageContributed = true;
+                }
+                noteDungeonRunKill(levelScope, contributionSnapshot!.contributors, entityId, destroyedEntity);
             }
 
             CombatHandler.finalizeHostileDeath(client, levelScope, entityId, destroyedEntity, {
@@ -5422,6 +5435,18 @@ export class CombatHandler {
                 return true;
             }
 
+            if (CombatHandler.completeRequiredBossFromClientHpReport(
+                client,
+                levelScope,
+                rawEntityId,
+                canonicalId,
+                targetEntity,
+                healthState,
+                amount
+            )) {
+                return true;
+            }
+
             const snapshots = CombatHandler.snapshotPartySharedHostileViewerHealth(client, levelScope, targetEntity);
             if (healthState.currentHp > 0) {
                 targetEntity.dead = false;
@@ -5458,6 +5483,18 @@ export class CombatHandler {
             return true;
         }
 
+        if (CombatHandler.completeRequiredBossFromClientHpReport(
+            client,
+            levelScope,
+            rawEntityId,
+            entityId,
+            targetEntity,
+            healthState,
+            amount
+        )) {
+            return true;
+        }
+
         if (CombatHandler.isTerminalHostileEntity(targetEntity)) {
             return true;
         }
@@ -5476,6 +5513,67 @@ export class CombatHandler {
                 CombatHandler.setEntityLastRegenTickAt(copy, 0);
             }
         }
+        return true;
+    }
+
+    private static completeRequiredBossFromClientHpReport(
+        client: Client,
+        levelScope: string,
+        rawEntityId: number,
+        entityId: number,
+        targetEntity: any,
+        healthState: { maxHp: number; currentHp: number; authoritativeKill: boolean },
+        amount: number
+    ): boolean {
+        if (
+            amount >= 0 ||
+            !MissionHandler.shouldCompleteDungeonFromBossHpReport(client, targetEntity)
+        ) {
+            return false;
+        }
+
+        const reportedNextHp = Math.max(
+            0,
+            Math.min(healthState.maxHp, Math.round(healthState.currentHp + amount))
+        );
+        if (reportedNextHp > 0) {
+            return false;
+        }
+
+        const canonicalId = Math.max(0, Math.round(Number(targetEntity?.id ?? entityId)));
+        CombatHandler.syncHostileHealthCopies(levelScope, targetEntity, 0, healthState.maxHp);
+        const completedEntity = CombatHandler.resolveLevelEntity(levelScope, canonicalId) ?? targetEntity;
+        for (const copy of CombatHandler.collectHostileHealthCopies(levelScope, completedEntity, true)) {
+            copy.clientDefeatVerified = true;
+            copy.playerDamageContributed = true;
+        }
+        completedEntity.clientDefeatVerified = true;
+        completedEntity.playerDamageContributed = true;
+
+        const contributorKey = getClientCharacterKey(client);
+        if (contributorKey) {
+            noteDungeonRunKill(levelScope, [contributorKey], canonicalId, completedEntity);
+        }
+        if (usesSharedDungeonProgress(getScopeLevelName(levelScope))) {
+            noteSharedDungeonHostileDestroyed(levelScope, canonicalId, completedEntity);
+            LevelHandler.refreshSharedDungeonQuestProgress(levelScope);
+        }
+        CombatHandler.handleEnemyDefeatState(
+            client,
+            levelScope,
+            canonicalId,
+            completedEntity,
+            { fromKillState: true }
+        );
+        console.log('[CombatHandler] Verified required dungeon boss from client HP report', {
+            scope: levelScope,
+            sourceToken: client.token,
+            rawEntityId,
+            canonicalId,
+            name: String(completedEntity?.name ?? ''),
+            previousHp: healthState.currentHp,
+            amount
+        });
         return true;
     }
 

@@ -1921,7 +1921,8 @@ export class MissionHandler {
             String(client.character.CurrentLevel?.name ?? '');
         return Boolean(
             currentLevel &&
-            DungeonCompletionConditions.allowsDefeatedBossProxyCopies(currentLevel) &&
+            LevelConfig.isDungeonLevel(currentLevel) &&
+            DungeonCompletionConditions.requiresBosses(currentLevel) &&
             DungeonCompletionConditions.isRequiredBoss(currentLevel, entity)
         );
     }
