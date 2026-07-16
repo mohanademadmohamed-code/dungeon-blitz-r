@@ -168,13 +168,17 @@ export class DungeonCompletionConditions {
         return Boolean(DungeonCompletionConditions.getCanonicalBossName(levelName, entity, levelScope));
     }
 
-    static isClientAuthorityBoss(levelName: string | null | undefined, entity: any): boolean {
+    static isClientAuthorityBoss(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
         if (!Boolean(entity?.clientSpawned)) {
             return false;
         }
         const condition = DungeonCompletionConditions.get(levelName);
         const allowed = new Set((condition?.clientAuthorityBosses ?? []).map(normalizeIdentity));
-        const canonical = DungeonCompletionConditions.getCanonicalBossName(levelName, entity);
+        const canonical = DungeonCompletionConditions.getCanonicalBossName(levelName, entity, levelScope);
         return Boolean(canonical && allowed.has(normalizeIdentity(canonical)));
     }
 

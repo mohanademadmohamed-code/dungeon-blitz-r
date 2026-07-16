@@ -1463,7 +1463,7 @@ export class CombatHandler {
         return Boolean(
             levelName &&
             (
-                DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity) ||
+                DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity, levelScope) ||
                 (
                     Boolean(entity?.clientSpawned) &&
                     DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope) &&

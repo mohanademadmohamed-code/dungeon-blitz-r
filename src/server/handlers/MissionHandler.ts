@@ -2966,7 +2966,7 @@ export class MissionHandler {
         // These levels deliberately leave their authored boss on the Flash client.
         // A terminal state/destroy packet is the authority signal even when the
         // server's cached HP snapshot did not receive the final delta first.
-        if (DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity)) {
+        if (DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity, levelScope)) {
             return false;
         }
 
@@ -2983,7 +2983,7 @@ export class MissionHandler {
             // Some authored client-owned bosses stay at 1 HP on the server until
             // the Flash client emits its defeat signal. Higher HP is never a
             // verified boss death.
-            if (hp <= 1 && DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity)) {
+            if (hp <= 1 && DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity, levelScope)) {
                 return false;
             }
 

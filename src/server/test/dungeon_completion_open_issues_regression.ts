@@ -11,7 +11,7 @@ const OPEN_COMPLETION_ISSUE_LEVELS: Readonly<Record<number, readonly string[]>> 
     595: ['GhostBossDungeon'],
     594: ['AC_Mission3Hard', 'AC_Mission4Hard', 'AC_Mission5Hard', 'AC_Mission6Hard'],
     591: ['OMM_Mission2Hard'],
-    583: ['SD_Mission4'],
+    583: ['SD_Mission4', 'SD_Mission4Hard'],
     576: ['CH_Mission3Hard'],
     573: ['AC_Mission1'],
     572: ['JC_Mission1Hard'],

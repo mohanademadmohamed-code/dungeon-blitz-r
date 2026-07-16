@@ -228,6 +228,8 @@ const NEVER_ENDING_DUNGEON_LEVELS = [
 ] as const;
 
 const AUTHORED_ENDING_GATE_LEVELS = [
+    'SD_Mission4',
+    'SD_Mission4Hard',
     'OMM_Mission7',
     'OMM_Mission7Hard',
     'OMM_Mission8',

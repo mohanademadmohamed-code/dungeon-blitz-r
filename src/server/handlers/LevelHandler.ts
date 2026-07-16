@@ -5184,12 +5184,32 @@ export class LevelHandler {
         const acceptsClientAuthorityTerminal = Boolean(
             isEnemyCanonical &&
             isDefeatEntState &&
-            DungeonCompletionConditions.isClientAuthorityBoss(currentLevel, canonicalEntity)
+            DungeonCompletionConditions.isClientAuthorityBoss(
+                currentLevel,
+                canonicalEntity,
+                getClientLevelScope(client)
+            )
         );
         const canonicalTerminal = isEnemyCanonical && (
             canonicalDestroyed ||
             (Number.isFinite(canonicalHp) && canonicalHp <= 0)
         );
+        if (acceptsClientAuthorityTerminal) {
+            for (const acceptedEntity of new Set([canonicalEntity, ent])) {
+                if (!acceptedEntity || typeof acceptedEntity !== 'object') {
+                    continue;
+                }
+                acceptedEntity.hp = 0;
+                acceptedEntity.dead = true;
+                acceptedEntity.entState = EntityState.DEAD;
+                acceptedEntity.clientDefeatVerified = true;
+                const maxHp = Math.max(0, Math.round(Number(acceptedEntity.maxHp ?? 0)));
+                if (maxHp > 0) {
+                    acceptedEntity.healthDelta = -maxHp;
+                    acceptedEntity.health_delta = -maxHp;
+                }
+            }
+        }
         if (canonicalTerminal) {
             const previousLocalHpValue = Number(ent?.hp ?? NaN);
             const previousLocalHp = Number.isFinite(previousLocalHpValue)
@@ -5232,6 +5252,18 @@ export class LevelHandler {
                 'terminal_entity_incremental_rejected',
                 rawEntityId
             );
+            const levelScope = getClientLevelScope(client);
+            if (
+                isDefeatEntState &&
+                DungeonCompletionConditions.isRequiredBoss(currentLevel, canonicalEntity, levelScope)
+            ) {
+                canonicalEntity.clientDefeatVerified = true;
+                LevelHandler.deferMissionWork(
+                    client,
+                    'terminal dungeon boss completion',
+                    () => MissionHandler.handleForcedDungeonBossCompletion(client, canonicalEntity)
+                );
+            }
             return;
         }
         if (
