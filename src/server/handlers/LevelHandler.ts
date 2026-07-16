@@ -5150,7 +5150,14 @@ export class LevelHandler {
             return;
         }
         if (isSelf && !isDefeatEntState) {
-            const movementResult = MovementAuthority.validateIncrementalMovement(client, ent, deltaX, deltaY);
+            const movementResult = MovementAuthority.validateIncrementalMovement(
+                client,
+                ent,
+                deltaX,
+                deltaY,
+                MovementAuthority.nowMs(),
+                [deltaVX, velocityY]
+            );
             if (!movementResult.accepted) {
                 const correctionDeltaX = Math.round(movementResult.lastAcceptedX - movementResult.attemptedX);
                 const correctionDeltaY = Math.round(movementResult.lastAcceptedY - movementResult.attemptedY);
@@ -5514,6 +5521,11 @@ export class LevelHandler {
             levelEntity.bBackpedal = flags.bBackpedal;
             levelEntity.velocityY = velocityY;
             levelEntity.airborne = isAirborne;
+        }
+
+        if (isActiveSelfState) {
+            const { CombatHandler } = require('./CombatHandler') as typeof import('./CombatHandler');
+            CombatHandler.notePlayerActiveMovementState(client);
         }
         
         // Update Saved Coords if it's us and safe level

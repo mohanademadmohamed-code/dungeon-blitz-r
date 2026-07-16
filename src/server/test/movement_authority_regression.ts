@@ -46,6 +46,7 @@ function buildPowerHitPayload(targetId: number, sourceId: number, damage: number
 
 function createClient(token: number, entityId: number, name: string): any {
     const sentPackets: Array<{ id: number; payload: Buffer }> = [];
+    let destroyed = false;
     return {
         token,
         userId: token,
@@ -65,7 +66,8 @@ function createClient(token: number, entityId: number, name: string): any {
         sentPackets,
         send(id: number, payload: Buffer): void { sentPackets.push({ id, payload: Buffer.from(payload) }); },
         sendBitBuffer(id: number, bb: BitBuffer): void { sentPackets.push({ id, payload: bb.toBuffer() }); },
-        socket: { destroy(): void { /* test stub */ } }
+        socket: { destroy(): void { destroyed = true; } },
+        get destroyed(): boolean { return destroyed; }
     };
 }
 
@@ -90,16 +92,128 @@ async function main(): Promise<void> {
         const ordinaryTeleport = MovementAuthority.validateIncrementalMovement(client, ownEntity, 1200, 0, now + 50);
         assert.equal(ordinaryTeleport.accepted, false, 'ordinary movement accepted a dash-sized teleport');
 
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        let acceptedHighRateDistance = 0;
+        for (let index = 1; index <= 20; index++) {
+            const result = MovementAuthority.validateIncrementalMovement(client, ownEntity, 100, 0, now + (index * 5));
+            if (!result.accepted) {
+                break;
+            }
+            ownEntity.x += 100;
+            acceptedHighRateDistance += 100;
+        }
+        assert.equal(
+            acceptedHighRateDistance <= 500,
+            true,
+            `high-rate movement packets created too much distance: ${acceptedHighRateDistance}`
+        );
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const normalStep = MovementAuthority.validateIncrementalMovement(client, ownEntity, 80, 0, now + 50);
+        assert.equal(normalStep.accepted, true, 'normal server-timed movement was rejected');
+        ownEntity.x += 80;
+        const highRateReplay = MovementAuthority.validateIncrementalMovement(client, ownEntity, 300, 0, now + 60);
+        assert.equal(highRateReplay.accepted, false, 'high-rate replayed movement packet gained extra distance');
+        assert.equal(highRateReplay.reason, 'speed_delta');
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const diagonalStep = MovementAuthority.validateIncrementalMovement(client, ownEntity, 360, 360, now + 200);
+        assert.equal(diagonalStep.accepted, false, 'diagonal movement bypassed normalized distance budget');
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const invalidNaN = MovementAuthority.validateIncrementalMovement(client, ownEntity, Number.NaN, 0, now + 100);
+        assert.equal(invalidNaN.accepted, false, 'NaN movement delta was accepted');
+        assert.equal(invalidNaN.reason, 'invalid_delta');
+
+        const invalidInfinity = MovementAuthority.validateIncrementalMovement(client, ownEntity, 0, Number.POSITIVE_INFINITY, now + 100);
+        assert.equal(invalidInfinity.accepted, false, 'Infinity movement delta was accepted');
+        assert.equal(invalidInfinity.reason, 'invalid_delta');
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const laggedMovement = MovementAuthority.validateIncrementalMovement(client, ownEntity, 850, 0, now + 1000);
+        assert.equal(laggedMovement.accepted, true, 'server-time budget did not tolerate delayed normal movement');
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const speedHack2x = MovementAuthority.validateIncrementalMovement(client, ownEntity, 1800, 0, now + 1000);
+        assert.equal(speedHack2x.accepted, false, '2x speedhack movement was accepted');
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const speedHack10x = MovementAuthority.validateIncrementalMovement(client, ownEntity, 9000, 0, now + 1000);
+        assert.equal(speedHack10x.accepted, false, '10x speedhack movement was accepted');
+        assert.equal(speedHack10x.reason, 'teleport_delta');
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const unmountedBurst = MovementAuthority.validateIncrementalMovement(client, ownEntity, 400, 0, now + 250);
+        assert.equal(unmountedBurst.accepted, false, 'unmounted speed budget allowed mount-speed movement');
+        client.character.equippedMount = 1;
+        MovementAuthority.reset(client, 'mount', 0, 0, now);
+        const mountedBurst = MovementAuthority.validateIncrementalMovement(client, ownEntity, 400, 0, now + 250);
+        assert.equal(mountedBurst.accepted, true, 'mounted speed budget rejected mount-speed movement');
+        client.character.equippedMount = 0;
+
+        client.movementSpeedMultiplier = 0.5;
+        MovementAuthority.reset(client, 'slow', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const slowedMovement = MovementAuthority.validateIncrementalMovement(client, ownEntity, 650, 0, now + 1000);
+        assert.equal(slowedMovement.accepted, false, 'server-side slow multiplier did not reduce movement budget');
+        const slowedValidMovement = MovementAuthority.validateIncrementalMovement(client, ownEntity, 450, 0, now + 1000);
+        assert.equal(slowedValidMovement.accepted, true, 'server-side slow multiplier rejected valid slowed movement');
+        client.movementSpeedMultiplier = 1;
+
+        client.movementRootUntilMs = now + 1000;
+        MovementAuthority.reset(client, 'root', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const rootedMovement = MovementAuthority.validateIncrementalMovement(client, ownEntity, 10, 0, now + 100);
+        assert.equal(rootedMovement.accepted, false, 'server-side root state allowed movement');
+        client.movementRootUntilMs = 0;
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now + 1000);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        const reorderedMovement = MovementAuthority.validateIncrementalMovement(client, ownEntity, 10, 0, now + 500);
+        assert.equal(reorderedMovement.accepted, false, 'reordered movement timestamp was accepted');
+        assert.equal(reorderedMovement.reason, 'reordered_movement_time');
+
         MovementAuthority.reset(client, 'spawn', 0, 0, Date.now());
+        ownEntity.x = 0;
+        ownEntity.y = 0;
         await CombatHandler.handlePowerCast(client, buildPowerCastPayload(client.clientEntID, 1394));
         const dashMovement = MovementAuthority.validateIncrementalMovement(client, ownEntity, 1200, 0, Date.now() + 50);
         assert.equal(dashMovement.accepted, true, 'validated Shadow Step cast did not grant one dash movement window');
         assert.equal(dashMovement.reason, 'mobility_grace');
 
         MovementAuthority.reset(client, 'spawn', 0, 0, Date.now());
+        ownEntity.x = 0;
+        ownEntity.y = 0;
         await CombatHandler.handlePowerCast(client, buildPowerCastPayload(remote.clientEntID, 1394));
         const spoofedDash = MovementAuthority.validateIncrementalMovement(client, ownEntity, 1200, 0, Date.now() + 50);
         assert.equal(spoofedDash.accepted, false, 'foreign-player dash cast granted movement authority');
+
+        MovementAuthority.reset(client, 'spawn', 0, 0, now);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        client.pendingTransferUntil = now + 500;
+        const transitionMovement = MovementAuthority.validateIncrementalMovement(client, ownEntity, 3000, 0, now + 10);
+        assert.equal(transitionMovement.accepted, true, 'server-authorized transition movement was rejected');
+        client.pendingTransferUntil = 0;
 
         LevelHandler.handleEntityIncrementalUpdate(client, buildMovementPayload(remote.clientEntID, 500, 0));
         assert.equal(remoteEntity.x, 100, 'client moved another player through packet 0x07');

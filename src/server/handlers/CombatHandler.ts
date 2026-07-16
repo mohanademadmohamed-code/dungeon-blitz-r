@@ -2345,6 +2345,53 @@ export class CombatHandler {
         CombatHandler.armBossRegenForPlayerDeath(client, nowMs, !wasAlreadyDead || !deathRegenWasArmed);
     }
 
+    static notePlayerActiveMovementState(client: Client, nowMs: number = Date.now()): void {
+        if (!client.character || client.clientEntID <= 0) {
+            return;
+        }
+
+        const levelScope = getClientLevelScope(client);
+        const localEntity = client.entities.get(client.clientEntID);
+        const levelEntity = CombatHandler.resolveLevelEntity(levelScope, client.clientEntID);
+        if (
+            CombatHandler.isEntityDead(localEntity) ||
+            CombatHandler.isEntityDead(levelEntity)
+        ) {
+            return;
+        }
+
+        const maxHp = Math.max(
+            1,
+            Math.round(Number(client.authoritativeMaxHp ?? 0)),
+            Math.round(Number(localEntity?.maxHp ?? 0)),
+            Math.round(Number(levelEntity?.maxHp ?? 0))
+        );
+        const hpCandidates = [
+            client.authoritativeCurrentHp,
+            localEntity?.hp,
+            levelEntity?.hp
+        ]
+            .map((value) => Math.round(Number(value ?? 0)))
+            .filter((value) => Number.isFinite(value) && value > 0);
+        const nextHp = Math.max(1, Math.min(maxHp, Math.max(1, ...hpCandidates)));
+
+        for (const entity of new Set([localEntity, levelEntity])) {
+            if (!entity || typeof entity !== 'object') {
+                continue;
+            }
+            entity.maxHp = Math.max(maxHp, Math.round(Number(entity.maxHp ?? 0)) || 0);
+            entity.hp = Math.max(1, Math.round(Number(entity.hp ?? 0)) || nextHp);
+            entity.dead = false;
+            if (Number(entity.entState ?? EntityState.ACTIVE) === EntityState.DEAD) {
+                entity.entState = EntityState.ACTIVE;
+            }
+        }
+
+        client.authoritativeMaxHp = maxHp;
+        client.authoritativeCurrentHp = Math.max(1, Math.min(maxHp, nextHp));
+        CombatHandler.clearEnemyDeathRegenArm(client);
+    }
+
     private static clearEnemyDeathRegenArm(client: Client): void {
         client.enemyDeathRegenArmed = false;
         const levelScope = getClientLevelScope(client);
@@ -3757,6 +3804,16 @@ export class CombatHandler {
     }
 
     private static getPlayerCombatPosition(client: Client, levelScope: string): CombatPoint | null {
+        const entityId = Math.max(0, Math.round(Number(client.clientEntID ?? 0)));
+        const localEntity = entityId > 0 && typeof client.entities?.get === 'function'
+            ? client.entities.get(entityId)
+            : null;
+        const livePosition = CombatHandler.getEntityPosition(localEntity) ??
+            CombatHandler.getEntityPosition(CombatHandler.resolveLevelEntity(levelScope, entityId));
+        if (livePosition) {
+            return livePosition;
+        }
+
         const currentLevel = client.character?.CurrentLevel;
         const currentX = Number(currentLevel?.x ?? NaN);
         const currentY = Number(currentLevel?.y ?? NaN);
@@ -3767,12 +3824,7 @@ export class CombatHandler {
             };
         }
 
-        const entityId = Math.max(0, Math.round(Number(client.clientEntID ?? 0)));
-        const localEntity = entityId > 0 && typeof client.entities?.get === 'function'
-            ? client.entities.get(entityId)
-            : null;
-        return CombatHandler.getEntityPosition(localEntity) ??
-            CombatHandler.getEntityPosition(CombatHandler.resolveLevelEntity(levelScope, entityId));
+        return null;
     }
 
     private static isPlayerInBossAggro(levelScope: string, entity: any, session: Client): boolean {

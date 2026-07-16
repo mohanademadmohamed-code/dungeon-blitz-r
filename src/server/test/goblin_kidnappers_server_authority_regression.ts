@@ -257,6 +257,22 @@ function buildEntityDeadIncrementalPayload(entityId: number): Buffer {
     return bb.toBuffer();
 }
 
+function buildEntityActiveIncrementalPayload(entityId: number, deltaX: number, deltaY: number): Buffer {
+    const bb = new BitBuffer(false);
+    bb.writeMethod4(entityId);
+    bb.writeMethod45(deltaX);
+    bb.writeMethod45(deltaY);
+    bb.writeMethod45(0);
+    bb.writeMethod6(EntityState.ACTIVE, 2);
+    bb.writeMethod15(false);
+    bb.writeMethod15(true);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    bb.writeMethod15(false);
+    return bb.toBuffer();
+}
+
 function buildPowerCastPayload(sourceId: number, powerId: number = 100): Buffer {
     const bb = new BitBuffer(false);
     bb.writeMethod4(sourceId);
@@ -523,6 +539,63 @@ function testTagUgoDoesNotRegenWhenPlayerRevivedWithStaleZeroHp(): void {
     );
     assert.equal(canonicalBoss.aggroTargetEntityId, client.clientEntID, 'active boss aggro target should not be cleared as dead');
     assert.equal(canonicalBoss.aggroTargetToken, client.token, 'active boss aggro token should not be cleared as dead');
+}
+
+function testTagUgoDoesNotRegenAfterActiveMovementWithStaleSavedPositionAndZeroHp(): void {
+    const client = createFakeClient('MovingBossFighter', 61012);
+    client.currentRoomId = 11;
+    client.character.CurrentLevel.x = 100;
+    client.character.CurrentLevel.y = 100;
+    resetFor(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+
+    EntityHandler.sendInitialLevelEntities(client as never, 'TutorialDungeon');
+    const scope = getClientLevelScope(client as never);
+    const canonicalBoss = GlobalState.levelEntities.get(scope)?.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    assert.ok(canonicalBoss, 'Tag Ugo canonical server boss should be seeded for live-movement regen regression');
+
+    canonicalBoss.hp = 500;
+    canonicalBoss.maxHp = 1000;
+    canonicalBoss.dead = false;
+    canonicalBoss.entState = EntityState.ACTIVE;
+    canonicalBoss.deathRegenArmedForPlayerKey = `${client.token}:${client.clientEntID}`;
+    canonicalBoss.lastCombatActivityAt = 1;
+    canonicalBoss.lastCombatRegenTickAt = 0;
+    canonicalBoss.aggroTargetEntityId = client.clientEntID;
+    canonicalBoss.aggroTargetToken = client.token;
+    canonicalBoss.x = 22695;
+    canonicalBoss.y = 2959;
+
+    client.authoritativeCurrentHp = 0;
+    client.enemyDeathRegenArmed = true;
+    const activePlayerEntity = {
+        id: client.clientEntID,
+        isPlayer: true,
+        roomId: 11,
+        x: 22600,
+        y: 2950,
+        hp: 0,
+        maxHp: 1000,
+        dead: false,
+        entState: EntityState.ACTIVE
+    };
+    client.entities.set(client.clientEntID, activePlayerEntity);
+    GlobalState.levelEntities.get(scope)?.set(client.clientEntID, { ...activePlayerEntity });
+
+    LevelHandler.handleEntityIncrementalUpdate(
+        client as never,
+        buildEntityActiveIncrementalPayload(client.clientEntID, 10, 0)
+    );
+    assert.equal(client.authoritativeCurrentHp > 0, true, 'active owner movement did not repair stale zero player HP');
+
+    (CombatHandler as any).processHostileOutOfCombatRegen(scope, canonicalBoss, 60_000);
+    assert.equal(canonicalBoss.hp, 500, 'Tag Ugo regenerated while live entity position was in boss aggro');
+    assert.equal(
+        String(canonicalBoss.deathRegenArmedForPlayerKey ?? ''),
+        '',
+        'active owner movement should clear stale player-death regen arms'
+    );
+    assert.equal(canonicalBoss.aggroTargetEntityId, client.clientEntID, 'live player aggro should use scoped entity position, not stale saved coordinates');
 }
 
 function testTagUgoStillRegensAfterActualPlayerDeath(): void {
@@ -887,6 +960,7 @@ async function main(): Promise<void> {
     testTagUgoUsesCanonicalServerStatsAndHpSync();
     testTagUgoUsesOneClientVisualBackedByCanonicalServerBoss();
     testTagUgoDoesNotRegenWhenPlayerRevivedWithStaleZeroHp();
+    testTagUgoDoesNotRegenAfterActiveMovementWithStaleSavedPositionAndZeroHp();
     testTagUgoStillRegensAfterActualPlayerDeath();
     testPartyLeaderSideEnemiesRemainClientPrivate();
     await testBossDefeatWaitsForDefeatCutscene();

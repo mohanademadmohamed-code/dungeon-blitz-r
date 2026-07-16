@@ -17,6 +17,7 @@ import { areClientsInSameLevelScope, getClientLevelScope, getLevelScopeKey, getS
 import { getPartyRuntimeLevelForClient } from '../core/RuntimeLevel';
 import { markRoomBossEntity } from '../core/RoomBossState';
 import { TutorialDungeonAuthorityEntity, TutorialDungeonMechanics } from '../core/TutorialDungeonMechanics';
+import { MovementAuthority } from '../core/MovementAuthority';
 
 export class EntityHandler {
     private static readonly CLIENT_SPAWN_LEVELS = new Set<string>([
@@ -3625,6 +3626,9 @@ export class EntityHandler {
         }
 
         client.entities.set(entityId, props);
+        if (ownsThisPlayerPacket) {
+            MovementAuthority.reset(client, 'entity_full_update_self', props.x, props.y);
+        }
         if (
             !isPlayer &&
             EntityHandler.applyTutorialDungeonWorldSnapshotToLocalObject(client, props, rawEntityId)
