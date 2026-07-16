@@ -149,7 +149,8 @@ export class DungeonCompletionConditions {
         }
 
         for (const entityName of getEntityNames(entity)) {
-            const canonical = requiredByKey.get(normalizeIdentity(entityName));
+            const normalizedEntityName = normalizeIdentity(entityName);
+            const canonical = requiredByKey.get(normalizedEntityName);
             if (canonical) {
                 if (
                     condition.requireRoomBossMarker &&
@@ -160,6 +161,7 @@ export class DungeonCompletionConditions {
                         condition.allowVerifiedClientBossWithoutRoomBossMarker &&
                         entity?.clientSpawned &&
                         entity?.playerDamageContributed &&
+                        normalizedEntityName === normalizeIdentity(canonical) &&
                         (condition.clientAuthorityBosses ?? [])
                             .map(normalizeIdentity)
                             .includes(normalizeIdentity(canonical))

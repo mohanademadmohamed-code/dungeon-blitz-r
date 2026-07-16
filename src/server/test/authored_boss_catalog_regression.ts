@@ -150,6 +150,23 @@ function assertVerifiedClientBossBypassesMissingMarker(levelName: string, bossNa
     GlobalState.levelEntities.delete(scope);
 }
 
+function assertVerifiedAliasStillNeedsMarker(levelName: string, aliasName: string, ordinal: number): void {
+    const scope = getLevelScopeKey(levelName, `verified-alias-marker-${ordinal}`);
+    const verified = deadBoss(35_000 + ordinal * 10, aliasName);
+    verified.clientSpawned = true;
+    verified.playerDamageContributed = true;
+    GlobalState.levelEntities.set(scope, new Map([[verified.id, verified]]));
+    DungeonCompletionSystem.noteEntityDefeated(scope, verified, 1000);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope, 1001).objectivesMet,
+        false,
+        `${levelName}: verified unmarked alias ${aliasName} bypassed the final-boss marker guard`
+    );
+
+    DungeonCompletionSystem.reset(scope);
+    GlobalState.levelEntities.delete(scope);
+}
+
 function assertPacketOnlyBossCompletes(levelName: string, bossName: string, ordinal: number): void {
     const scope = getLevelScopeKey(levelName, `packet-only-boss-${ordinal}`);
     const boss = deadBoss(40_000 + ordinal * 10, bossName);
@@ -158,6 +175,19 @@ function assertPacketOnlyBossCompletes(levelName: string, bossName: string, ordi
         DungeonCompletionSystem.evaluate(scope, 1001).ready,
         true,
         `${levelName}: packet-only boss defeat did not complete without a scoped entity map`
+    );
+
+    DungeonCompletionSystem.reset(scope);
+}
+
+function assertPacketOnlyBossDoesNotComplete(levelName: string, entityName: string, ordinal: number): void {
+    const scope = getLevelScopeKey(levelName, `packet-only-non-boss-${ordinal}`);
+    const entity = deadBoss(50_000 + ordinal * 10, entityName);
+    DungeonCompletionSystem.noteEntityDefeated(scope, entity, 1000);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope, 1001).ready,
+        false,
+        `${levelName}: packet-only non-boss ${entityName} satisfied completion`
     );
 
     DungeonCompletionSystem.reset(scope);
@@ -186,10 +216,21 @@ function testScriptedIdentityAndEarlyEndingGuardrails(): void {
     assertMarkerRequired('SD_Mission4Hard', 'OasisVizierGreenHard', 'OasisVizierHard', 4);
     assertMarkedAliasCompletes('JC_Mission11', 'BrigandChampMarker', 'BrigandChamp', 5);
     assertMarkedAliasCompletes('JC_Mission11Hard', 'BrigandChampMarkerHard', 'BrigandChampHard', 6);
-    assertVerifiedClientBossBypassesMissingMarker('SD_Mission4', 'OasisVizier', 7);
-    assertVerifiedClientBossBypassesMissingMarker('SD_Mission4Hard', 'OasisVizierHard', 8);
-    assertPacketOnlyBossCompletes('SD_Mission1', 'RaptorHorned', 9);
-    assertPacketOnlyBossCompletes('SD_Mission1Hard', 'RaptorHornedHard', 10);
+    assertMarkedAliasCompletes('SD_Mission4', 'OasisVizierGreen', 'OasisVizier', 7);
+    assertMarkedAliasCompletes('SD_Mission4Hard', 'OasisVizierGreenHard', 'OasisVizierHard', 8);
+    assertVerifiedClientBossBypassesMissingMarker('SD_Mission4', 'OasisVizier', 9);
+    assertVerifiedClientBossBypassesMissingMarker('SD_Mission4Hard', 'OasisVizierHard', 10);
+    assertVerifiedAliasStillNeedsMarker('SD_Mission4', 'OasisVizierGreen', 11);
+    assertVerifiedAliasStillNeedsMarker('SD_Mission4Hard', 'OasisVizierGreenHard', 12);
+    assertPacketOnlyBossCompletes('SD_Mission1', 'RaptorHorned', 13);
+    assertPacketOnlyBossCompletes('SD_Mission1Hard', 'RaptorHornedHard', 14);
+    assertPacketOnlyBossCompletes('SD_Mission1', 'RaptorHorned2', 15);
+    assertPacketOnlyBossCompletes('SD_Mission1Hard', 'RaptorHorned2Hard', 16);
+    assertPacketOnlyBossCompletes('JC_Mission5', 'NephitDragonMarker', 17);
+    assertPacketOnlyBossCompletes('JC_Mission5Hard', 'NephitDragonMarkerHard', 18);
+    assertPacketOnlyBossCompletes('JC_Mission5Hard', 'NephitDragonMarker', 19);
+    assertPacketOnlyBossDoesNotComplete('JC_Mission5', 'NephitDragonPortal', 20);
+    assertPacketOnlyBossDoesNotComplete('JC_Mission5Hard', 'NephitDragonPortalHard', 21);
 }
 
 function main(): void {
