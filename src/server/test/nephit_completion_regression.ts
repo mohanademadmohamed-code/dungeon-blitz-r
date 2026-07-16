@@ -114,12 +114,12 @@ function createFakeClient(name: string, token: number, questTrackerState: number
     };
 }
 
-function createNephitBoss(alias: string = 'Nephit'): any {
+function createNephitBoss(alias: string = 'GrayGhostLord'): any {
     return {
         id: 8801,
         name: alias,
-        characterName: `,${alias}`,
-        character_name: `,${alias}`,
+        characterName: alias === 'GrayGhostLord' ? 'NRGhostBoss' : `,${alias}`,
+        character_name: alias === 'GrayGhostLord' ? 'NRGhostBoss' : `,${alias}`,
         isPlayer: false,
         roomId: 12,
         team: EntityTeam.ENEMY,

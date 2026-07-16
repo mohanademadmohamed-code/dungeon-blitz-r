@@ -22,6 +22,7 @@ export type DungeonCompletionCondition = {
     allowDefeatedBossProxyCopies?: boolean;
     requirePlayerDamageForClientBosses?: boolean;
     clientAuthorityBosses?: string[];
+    requireRoomBossMarker?: boolean;
 };
 
 export type DungeonCompletionPhase =

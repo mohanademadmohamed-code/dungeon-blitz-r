@@ -418,27 +418,21 @@ export class WorldEnter {
 
     static getPlayerDataBuildingState(
         character: Character,
-        targetLevel: string = '',
-        buildingStateCharacter: Character | null = null
+        targetLevel: string = ''
     ): {
         magicForge: Record<string, any>;
         statsByBuilding: Record<string, unknown>;
         buildingUpgrade: Record<string, any>;
     } {
-        const sourceCharacter = buildingStateCharacter ?? character;
         return {
-            magicForge: WorldEnter.asRecord(sourceCharacter.magicForge),
-            statsByBuilding: WorldEnter.getTutorialSafeBuildingStatsForLevel(sourceCharacter, targetLevel),
-            buildingUpgrade: WorldEnter.getTutorialSafeBuildingUpgradeForLevel(sourceCharacter, targetLevel)
+            magicForge: WorldEnter.asRecord(character.magicForge),
+            statsByBuilding: WorldEnter.getTutorialSafeBuildingStatsForLevel(character, targetLevel),
+            buildingUpgrade: WorldEnter.getTutorialSafeBuildingUpgradeForLevel(character, targetLevel)
         };
     }
 
-    static getPlayerDataBuildingOrder(
-        character: Character,
-        buildingStateCharacter: Character | null = null
-    ): number[] {
-        const buildingStateSource = buildingStateCharacter ?? character;
-        const className = (buildingStateSource.class || character.class || '').toLowerCase();
+    static getPlayerDataBuildingOrder(character: Character): number[] {
+        const className = (character.class || '').toLowerCase();
         return className === 'mage'
             ? [2, 12, 6, 7, 8, 1, 13]
             : className === 'rogue'
@@ -532,8 +526,7 @@ export class WorldEnter {
         newX: number = 0,
         newY: number = 0,
         newHasCoord: boolean = false,
-        sendExtended: boolean = false,
-        buildingStateCharacter: Character | null = null
+        sendExtended: boolean = false
     ): BitBuffer {
         const bb = new BitBuffer();
         const now = Math.floor(Date.now() / 1000);
@@ -545,11 +538,7 @@ export class WorldEnter {
         }
         reconcileConsumableSelectionState(character);
         const equippedGears = WorldEnter.asArray(character.equippedGears);
-        const buildingStateSource = buildingStateCharacter ?? character;
-        if (buildingStateCharacter && buildingStateCharacter !== character) {
-            WorldEnter.ensureSelectedDisciplineTower(buildingStateCharacter);
-        }
-        const buildingState = WorldEnter.getPlayerDataBuildingState(character, targetLevel, buildingStateCharacter);
+        const buildingState = WorldEnter.getPlayerDataBuildingState(character, targetLevel);
         const safeStatsByBuilding = buildingState.statsByBuilding;
         const safeBuildingUpgrade = buildingState.buildingUpgrade;
 
@@ -829,7 +818,7 @@ export class WorldEnter {
             const hasForgeStats = Object.keys(statsByBuilding).length > 0;
             bb.writeMethod11(hasForgeStats ? 1 : 0, 1);
             if (hasForgeStats) {
-                const buildOrder = WorldEnter.getPlayerDataBuildingOrder(character, buildingStateSource);
+                const buildOrder = WorldEnter.getPlayerDataBuildingOrder(character);
 
                 for (const buildingId of buildOrder) {
                     bb.writeMethod6(Number(statsByBuilding[buildingId.toString()] ?? 0), 5);

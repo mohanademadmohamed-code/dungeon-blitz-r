@@ -15,7 +15,11 @@ type Scenario = {
     entities: any[];
 };
 
-function makeEntity(id: number, name: string, options: { clientSpawned?: boolean } = {}): any {
+function makeEntity(
+    id: number,
+    name: string,
+    options: { clientSpawned?: boolean; roomBoss?: boolean } = {}
+): any {
     return {
         id,
         name,
@@ -26,6 +30,10 @@ function makeEntity(id: number, name: string, options: { clientSpawned?: boolean
         entState: EntityState.ACTIVE,
         team: EntityTeam.ENEMY,
         clientSpawned: Boolean(options.clientSpawned),
+        isRoomBoss: Boolean(options.roomBoss),
+        roomBoss: Boolean(options.roomBoss),
+        roomBossRoomId: options.roomBoss ? 99 : undefined,
+        roomBossName: options.roomBoss ? name : undefined,
         playerDamageContributed: true,
         lifeNonce: 1
     };
@@ -43,7 +51,8 @@ function createScenario(levelName: string, suffix: string): Scenario {
         for (const group of condition.bossGroups ?? []) {
             const bossName = group[0];
             entities.push(makeEntity(nextEntityId++, bossName, {
-                clientSpawned: Boolean(condition.clientAuthorityBosses?.includes(bossName))
+                clientSpawned: Boolean(condition.clientAuthorityBosses?.includes(bossName)),
+                roomBoss: Boolean(condition.requireRoomBossMarker)
             }));
         }
         for (const objective of condition.entityObjectives ?? []) {

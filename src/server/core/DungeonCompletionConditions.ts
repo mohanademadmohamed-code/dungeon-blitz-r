@@ -5,6 +5,7 @@ import type {
     DungeonCompletionEntityObjective,
     DungeonCompletionMode
 } from './DungeonCompletionTypes';
+import { isRoomBossEntity } from './RoomBossState';
 
 type RawCatalog = {
     schemaVersion?: unknown;
@@ -40,6 +41,14 @@ function getEntityNames(entity: any): string[] {
         }
     }
     return [...names];
+}
+
+function hasExplicitRoomBossMarker(entity: any): boolean {
+    const roomBossRoomId = Number(entity?.roomBossRoomId ?? NaN);
+    return Boolean(entity?.isRoomBoss) ||
+        Boolean(entity?.roomBoss) ||
+        (Number.isFinite(roomBossRoomId) && roomBossRoomId >= 0) ||
+        String(entity?.roomBossName ?? '').trim().length > 0;
 }
 
 function cloneObjective(objective: DungeonCompletionEntityObjective): DungeonCompletionEntityObjective {
@@ -119,9 +128,20 @@ export class DungeonCompletionConditions {
         return names;
     }
 
-    static getCanonicalBossName(levelName: string | null | undefined, entity: any): string {
+    static getCanonicalBossName(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): string {
         const condition = DungeonCompletionConditions.get(levelName);
         if (!condition || condition.mode !== 'bosses') {
+            return '';
+        }
+        if (
+            condition.requireRoomBossMarker &&
+            !hasExplicitRoomBossMarker(entity) &&
+            !(levelScope && isRoomBossEntity(levelScope, entity))
+        ) {
             return '';
         }
 
@@ -144,8 +164,8 @@ export class DungeonCompletionConditions {
         return '';
     }
 
-    static isRequiredBoss(levelName: string | null | undefined, entity: any): boolean {
-        return Boolean(DungeonCompletionConditions.getCanonicalBossName(levelName, entity));
+    static isRequiredBoss(levelName: string | null | undefined, entity: any, levelScope: string = ''): boolean {
+        return Boolean(DungeonCompletionConditions.getCanonicalBossName(levelName, entity, levelScope));
     }
 
     static isClientAuthorityBoss(levelName: string | null | undefined, entity: any): boolean {
@@ -211,6 +231,9 @@ export class DungeonCompletionConditions {
                     if (!canonicalBosses.has(clientBoss)) {
                         errors.push(`${levelName}: client-authority boss ${clientBoss} is not required`);
                     }
+                }
+                if (condition.requireRoomBossMarker !== undefined && typeof condition.requireRoomBossMarker !== 'boolean') {
+                    errors.push(`${levelName}: requireRoomBossMarker must be boolean`);
                 }
             }
             if (condition.mode !== 'bosses' && (condition.bossGroups?.length || condition.bossAliases)) {

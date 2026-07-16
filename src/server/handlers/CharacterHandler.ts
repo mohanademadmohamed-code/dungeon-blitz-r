@@ -195,22 +195,12 @@ export class CharacterHandler {
         return TransferTokenAllocator.allocate(targetLevel);
     }
 
-    private static isVisitedCraftTownPendingTransfer(entry: PendingTransfer): boolean {
-        if (entry.targetLevel !== 'CraftTown' || !entry.craftTownHostCharacter) {
-            return false;
-        }
-
-        const visitorKey = normalizeCharacterKey(entry.character.name);
-        const hostKey = normalizeCharacterKey(entry.craftTownHostCharacter.name);
-        return Boolean(visitorKey && hostKey && visitorKey !== hostKey);
-    }
-
     private static shouldSendExtendedPlayerData(
         firstLogin: boolean,
         pendingExtended: boolean,
         entry: PendingTransfer
     ): boolean {
-        return firstLogin || pendingExtended || CharacterHandler.isVisitedCraftTownPendingTransfer(entry);
+        return firstLogin || pendingExtended || entry.targetLevel === 'CraftTown';
     }
 
     private static repairUnsafeSavedDungeonLocation(character: Character): boolean {
@@ -1303,9 +1293,6 @@ export class CharacterHandler {
         await MissionHandler.prepareFullClearDungeonEntry(client);
 
         // Send Player Data (0x10)
-        const buildingStateCharacter = isVisitingAnotherPlayersCraftTown(client)
-            ? client.craftTownHostCharacter
-            : null;
         const pdPkt = WorldEnter.buildPlayerDataPacket(
             client.character,
             token,
@@ -1315,8 +1302,7 @@ export class CharacterHandler {
             spawn.x,
             spawn.y,
             spawn.hasCoord,
-            sendExtended,
-            buildingStateCharacter
+            sendExtended
         );
         const pdBuffer = pdPkt.toBuffer();
 

@@ -1554,7 +1554,7 @@ export class MissionHandler {
 
         if (
             currentLevel === 'CraftTownTutorial' &&
-            DungeonCompletionConditions.isRequiredBoss(currentLevel, destroyedEntity)
+            DungeonCompletionConditions.isRequiredBoss(currentLevel, destroyedEntity, levelScope)
         ) {
             if (client.keepTutorialState) {
                 client.keepTutorialState.bossDefeated = true;
@@ -1576,7 +1576,7 @@ export class MissionHandler {
             return;
         }
 
-        if (DungeonCompletionConditions.isRequiredBoss(currentLevel, destroyedEntity)) {
+        if (DungeonCompletionConditions.isRequiredBoss(currentLevel, destroyedEntity, levelScope)) {
             const bossRoomId = MissionHandler.getEntityRoomId(destroyedEntity);
             if (bossRoomId > 0) {
                 noteDungeonRunBossCutscene(
@@ -1896,11 +1896,11 @@ export class MissionHandler {
             }
 
             const entityId = Math.max(0, Math.round(Number(entity.id ?? entity.entId ?? entity.EntityID ?? 0)));
-            if (entityId <= 0 || !DungeonCompletionConditions.isRequiredBoss(levelName, entity)) {
+            if (entityId <= 0 || !DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope)) {
                 continue;
             }
 
-            if (MissionHandler.isRequiredDungeonCompletionBossEntity(levelName, entity)) {
+            if (MissionHandler.isRequiredDungeonCompletionBossEntity(levelName, entity, levelScope)) {
                 return entityId;
             }
 
@@ -1923,7 +1923,7 @@ export class MissionHandler {
             currentLevel &&
             LevelConfig.isDungeonLevel(currentLevel) &&
             DungeonCompletionConditions.requiresBosses(currentLevel) &&
-            DungeonCompletionConditions.isRequiredBoss(currentLevel, entity)
+            DungeonCompletionConditions.isRequiredBoss(currentLevel, entity, getClientLevelScope(client))
         );
     }
 
@@ -2847,12 +2847,20 @@ export class MissionHandler {
         }
     }
 
-    private static isRequiredDungeonBossEntity(levelName: string | null | undefined, entity: any): boolean {
-        return DungeonCompletionConditions.isRequiredBoss(levelName, entity);
+    private static isRequiredDungeonBossEntity(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
+        return DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope);
     }
 
-    private static isRequiredDungeonCompletionBossEntity(levelName: string | null | undefined, entity: any): boolean {
-        return DungeonCompletionConditions.isRequiredBoss(levelName, entity);
+    private static isRequiredDungeonCompletionBossEntity(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
+        return DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope);
     }
 
     static shouldProcessEnemyKillStateDungeonCompletion(client: Client, entity: any): boolean {
@@ -2881,18 +2889,26 @@ export class MissionHandler {
             Boolean(entity?.clientSpawned) &&
             (
                 condition.mode === 'full-clear' ||
-                DungeonCompletionConditions.isRequiredBoss(currentLevel, entity) ||
+                DungeonCompletionConditions.isRequiredBoss(currentLevel, entity, levelScope) ||
                 Boolean(DungeonCompletionConditions.getObjectiveRole(currentLevel, entity))
             )
         );
     }
 
-    static isRequiredDungeonCompletionBossForLevel(levelName: string | null | undefined, entity: any): boolean {
-        return DungeonCompletionConditions.isRequiredBoss(levelName, entity);
+    static isRequiredDungeonCompletionBossForLevel(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
+        return DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope);
     }
 
-    static shouldIgnoreUnverifiedDungeonBossDefeat(levelName: string | null | undefined, entity: any): boolean {
-        if (!DungeonCompletionConditions.isRequiredBoss(levelName, entity)) {
+    static shouldIgnoreUnverifiedDungeonBossDefeat(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
+        if (!DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope)) {
             return false;
         }
 

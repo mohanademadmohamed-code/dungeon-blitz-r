@@ -1,11 +1,12 @@
 import abilityTypes from '../data/AbilityTypes.json';
 import { JsonAdapter } from '../database/JsonAdapter';
 import { Client } from '../core/Client';
-import { MasterClassID } from '../core/Enums';
+import { BuildingID, MasterClassID } from '../core/Enums';
 import { TalentConfig } from '../core/TalentConfig';
 import { BitReader } from '../network/protocol/bitReader';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 import { EntityHandler } from './EntityHandler';
+import { isVisitingAnotherPlayersCraftTown } from '../utils/HomeVisitGuard';
 
 type AbilityDef = {
     AbilityID: string;
@@ -53,6 +54,26 @@ export class AbilityHandler {
         [MasterClassID.Necromancer]: 'Necromancer'
     };
 
+    private static rejectsVisitedHomeMutation(client: Client): boolean {
+        return isVisitingAnotherPlayersCraftTown(client);
+    }
+
+    private static getAuthoritativeTomeRank(character: CharacterRecord): number {
+        const magicForge = character.magicForge && typeof character.magicForge === 'object' && !Array.isArray(character.magicForge)
+            ? character.magicForge as Record<string, unknown>
+            : {};
+        const stats = magicForge.stats_by_building && typeof magicForge.stats_by_building === 'object' && !Array.isArray(magicForge.stats_by_building)
+            ? magicForge.stats_by_building as Record<string, unknown>
+            : {};
+        const rank = Math.floor(Number(stats[String(BuildingID.Tome)] ?? 0));
+        return Number.isFinite(rank) ? Math.max(0, Math.min(rank, 10)) : 0;
+    }
+
+    private static canResearchRank(character: CharacterRecord, rank: number): boolean {
+        // Building rank N unlocks ability rank N + 1, as authored in BuildingTypes.
+        return rank <= AbilityHandler.getAuthoritativeTomeRank(character) + 1;
+    }
+
     static async handleActiveAbilitiesUpdate(client: Client, data: Buffer): Promise<void> {
         if (!client.character) return;
 
@@ -74,17 +95,17 @@ export class AbilityHandler {
     }
 
     static async handleStartAbilityResearch(client: Client, data: Buffer): Promise<void> {
-        if (!client.character) return;
+        if (!client.character || AbilityHandler.rejectsVisitedHomeMutation(client)) return;
 
         const br = new BitReader(data);
         const abilityId = br.readMethod20(7);
         const rank = br.readMethod20(4);
         const payWithIdols = br.readMethod15();
-        AbilityHandler.repairCharacterAbilityState(client.character);
 
-        if (abilityId <= 0 || rank <= 0) {
+        if (abilityId <= 0 || rank <= 0 || !AbilityHandler.canResearchRank(client.character, rank)) {
             return;
         }
+        AbilityHandler.repairCharacterAbilityState(client.character);
 
         const skillResearch = AbilityHandler.getSkillResearch(client.character);
         if (Number(skillResearch.abilityID ?? 0) !== 0) {
@@ -166,7 +187,7 @@ export class AbilityHandler {
     }
 
     static async handleClaimAbilityResearch(client: Client): Promise<void> {
-        if (!client.character) return;
+        if (!client.character || AbilityHandler.rejectsVisitedHomeMutation(client)) return;
 
         const skillResearch = AbilityHandler.getSkillResearch(client.character);
         const abilityId = Number(skillResearch.abilityID ?? 0);
@@ -193,14 +214,14 @@ export class AbilityHandler {
     }
 
     static async handleClearAbilityResearch(client: Client): Promise<void> {
-        if (!client.character) return;
+        if (!client.character || AbilityHandler.rejectsVisitedHomeMutation(client)) return;
 
         client.character.SkillResearch = {};
         await AbilityHandler.saveCharacter(client);
     }
 
     static async handleSpeedupAbilityResearch(client: Client, data: Buffer): Promise<void> {
-        if (!client.character) return;
+        if (!client.character || AbilityHandler.rejectsVisitedHomeMutation(client)) return;
 
         const br = new BitReader(data);
         const idolCost = br.readMethod9();

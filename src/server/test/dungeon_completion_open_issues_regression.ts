@@ -39,13 +39,17 @@ const OPEN_COMPLETION_ISSUE_LEVELS: Readonly<Record<number, readonly string[]>> 
     520: ['SD_Mission3Hard']
 };
 
-function makeHostile(id: number, name: string): any {
+function makeHostile(id: number, name: string, roomBoss: boolean = false): any {
     return {
         id,
         name,
         EntName: name,
         team: EntityTeam.ENEMY,
         clientSpawned: true,
+        isRoomBoss: roomBoss,
+        roomBoss,
+        roomBossRoomId: roomBoss ? 99 : undefined,
+        roomBossName: roomBoss ? name : undefined,
         playerDamageContributed: true,
         hp: 100,
         maxHp: 100,
@@ -67,7 +71,7 @@ function verifyIssueLevel(issue: number, levelName: string, ordinal: number): vo
 
     if (condition.mode === 'bosses') {
         for (const group of condition.bossGroups ?? []) {
-            levelMap.set(nextId, makeHostile(nextId, group[0]));
+            levelMap.set(nextId, makeHostile(nextId, group[0], Boolean(condition.requireRoomBossMarker)));
             nextId += 1;
         }
     } else if (condition.mode === 'full-clear') {

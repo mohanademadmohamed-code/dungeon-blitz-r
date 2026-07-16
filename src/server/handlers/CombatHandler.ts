@@ -1458,7 +1458,7 @@ export class CombatHandler {
                 DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity) ||
                 (
                     Boolean(entity?.clientSpawned) &&
-                    DungeonCompletionConditions.isRequiredBoss(levelName, entity) &&
+                    DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope) &&
                     CombatHandler.isKnownClientRoomBossEntity(levelName, entity)
                 )
             )
@@ -4474,7 +4474,7 @@ export class CombatHandler {
             });
         }
 
-        if (MissionHandler.isRequiredDungeonCompletionBossForLevel(levelName, canonicalEntity)) {
+        if (MissionHandler.isRequiredDungeonCompletionBossForLevel(levelName, canonicalEntity, levelScope)) {
             const roomId = Math.max(0, Math.round(Number(canonicalEntity?.roomId ?? canonicalEntity?.RoomID ?? canonicalEntity?.room_id ?? 0) || 0));
             LevelHandler.sendRoomUnlock(client, roomId);
         }
@@ -5115,7 +5115,7 @@ export class CombatHandler {
             destroyedEntity &&
             !destroyedEntity.isPlayer &&
             Number(destroyedEntity.team ?? 0) === EntityTeam.ENEMY &&
-            !MissionHandler.shouldIgnoreUnverifiedDungeonBossDefeat(levelName, destroyedEntity)
+            !MissionHandler.shouldIgnoreUnverifiedDungeonBossDefeat(levelName, destroyedEntity, levelScope)
         );
 
         if (shouldMirrorClientSpawnEntity && destroyedEntity && !isSeedOutsideClientSpawnDestroy) {

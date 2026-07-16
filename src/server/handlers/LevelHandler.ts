@@ -4070,7 +4070,7 @@ export class LevelHandler {
     }
 
     private static shouldSendExtendedOnTransfer(targetLevel: string): boolean {
-        return false;
+        return targetLevel === 'CraftTown';
     }
 
     private static isDifferentCharacter(left: Character | null | undefined, right: Character | null | undefined): boolean {
@@ -4083,13 +4083,15 @@ export class LevelHandler {
         client: Client,
         transferToken: number,
         activeCharacter: Character,
-        targetLevel: string
+        targetLevel: string,
+        explicitHostCharacter: Character | null = null
     ): Character {
         if (targetLevel !== 'CraftTown') {
+            client.craftTownHostCharacter = null;
             return activeCharacter;
         }
 
-        const queuedHost = GlobalState.houseVisits.get(transferToken);
+        const queuedHost = explicitHostCharacter ?? GlobalState.houseVisits.get(transferToken);
         if (queuedHost) {
             GlobalState.houseVisits.delete(transferToken); // Consume
             if (LevelHandler.isDifferentCharacter(activeCharacter, queuedHost)) {
@@ -4100,11 +4102,6 @@ export class LevelHandler {
 
             client.craftTownHostCharacter = null;
             return activeCharacter;
-        }
-
-        if (LevelHandler.isDifferentCharacter(activeCharacter, client.craftTownHostCharacter)) {
-            console.log(`[Level] House Visit active from session host! Host: ${client.craftTownHostCharacter!.name}`);
-            return client.craftTownHostCharacter!;
         }
 
         client.craftTownHostCharacter = null;
@@ -4929,10 +4926,6 @@ export class LevelHandler {
             console.error(`[Level] Character state disappeared during transfer. Token=${packetToken}`);
             return;
         }
-        if (targetLevel === 'CraftTown' && teleportOverride?.craftTownHostCharacter) {
-            client.craftTownHostCharacter = teleportOverride.craftTownHostCharacter;
-        }
-
         const oldLevel = LevelHandler.resolveTransferSourceLevel(client, activeCharacter);
         const ent = client.entities.get(client.clientEntID);
         let oldX = 0, oldY = 0;
@@ -4979,7 +4972,8 @@ export class LevelHandler {
             client,
             transferToken,
             activeCharacter,
-            targetLevel
+            targetLevel,
+            teleportOverride?.craftTownHostCharacter ?? null
         );
 
         // 7. Store Pending Transfer State
@@ -5404,7 +5398,11 @@ export class LevelHandler {
         const shouldIgnoreUnverifiedDungeonBossDeadState =
             isEnemyEntity &&
             isDefeatEntState &&
-            MissionHandler.shouldIgnoreUnverifiedDungeonBossDefeat(currentLevel, levelEntity ?? ent);
+            MissionHandler.shouldIgnoreUnverifiedDungeonBossDefeat(
+                currentLevel,
+                levelEntity ?? ent,
+                getClientLevelScope(client)
+            );
         const canonicalEntState = shouldIgnoreUnverifiedDungeonBossDeadState
             ? EntityState.ACTIVE
             : entState;

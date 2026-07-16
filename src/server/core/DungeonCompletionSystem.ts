@@ -142,7 +142,7 @@ export class DungeonCompletionSystem {
 
         const entityId = getEntityId(entity);
         const lifeNonce = Math.max(0, Math.round(Number(entity?.lifeNonce ?? entity?.deathVersion ?? 0)));
-        const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity);
+        const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity, state.levelScope);
         const objectiveRole = DungeonCompletionConditions.getObjectiveRole(state.levelName, entity);
         const eventIdentity = canonicalBoss || objectiveRole || String(entity?.name ?? entity?.EntName ?? 'hostile');
         const tutorialAuthority = TutorialDungeonMechanics.isTutorialDungeon(state.levelName)
@@ -352,7 +352,7 @@ export class DungeonCompletionSystem {
         const scopeEntities = [...(GlobalState.levelEntities.get(state.levelScope)?.values() ?? [])];
         if (Math.max(0, Number(condition.simultaneousBossWindowMs ?? 0)) > 0) {
             for (const entity of scopeEntities) {
-                const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity);
+                const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity, state.levelScope);
                 if (canonicalBoss && !isDefeated(entity)) {
                     state.defeatedBosses.delete(canonicalBoss);
                     state.defeatedBossAt.delete(canonicalBoss);
@@ -364,7 +364,7 @@ export class DungeonCompletionSystem {
             if (!isDefeated(entity)) {
                 continue;
             }
-            const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity);
+            const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity, state.levelScope);
             if (canonicalBoss) {
                 state.defeatedBosses.add(canonicalBoss);
                 if (!state.defeatedBossAt.has(canonicalBoss)) {
@@ -384,7 +384,7 @@ export class DungeonCompletionSystem {
         if (condition.mode === 'bosses' && condition.requirePlayerDamageForClientBosses) {
             for (const canonicalBoss of [...state.defeatedBosses]) {
                 const matchingEntity = [...(GlobalState.levelEntities.get(state.levelScope)?.values() ?? [])]
-                    .find((entity) => DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity) === canonicalBoss);
+                    .find((entity) => DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity, state.levelScope) === canonicalBoss);
                 if (matchingEntity?.clientSpawned && !matchingEntity.playerDamageContributed) {
                     state.defeatedBosses.delete(canonicalBoss);
                     state.defeatedBossAt.delete(canonicalBoss);

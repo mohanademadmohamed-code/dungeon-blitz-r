@@ -8,9 +8,11 @@ import { BitReader } from '../network/protocol/bitReader';
 import { CharmID } from '../data/runtime/Charms';
 import { ConsumableID, ConsumableType } from '../data/runtime/Consumables';
 import { MissionID } from '../data/runtime';
+import { BuildingID } from '../core/Enums';
 import { PetHandler } from './PetHandler';
 import { sendConsumableUpdate } from '../utils/ConsumableState';
-import { normalizeCharacterMaterials } from '../utils/MaterialInventory';
+import { normalizeMaterialEntries } from '../utils/MaterialInventory';
+import { isVisitingAnotherPlayersCraftTown } from '../utils/HomeVisitGuard';
 
 const db = new JsonAdapter();
 
@@ -139,6 +141,34 @@ export class ForgeHandler {
         const charm = ForgeHandler.getCharacterCharmEntry(primaryId);
         const size = Number(charm?.CharmSize ?? 1);
         return Math.max(1, Math.min(size || 1, 10));
+    }
+
+    private static rejectsVisitedHomeMutation(client: Client): boolean {
+        return isVisitingAnotherPlayersCraftTown(client);
+    }
+
+    private static getAuthoritativeForgeRank(character: any): number {
+        const stats = character?.magicForge?.stats_by_building;
+        if (!stats || typeof stats !== 'object' || Array.isArray(stats)) {
+            return 0;
+        }
+
+        const rank = Math.floor(Number(stats[String(BuildingID.Forge)] ?? stats[BuildingID.Forge] ?? 0));
+        return Number.isFinite(rank) ? Math.max(0, Math.min(rank, 10)) : 0;
+    }
+
+    private static canCraftCharm(character: any, charm: any): boolean {
+        if (!charm || String(charm.DisallowCrafting ?? '').trim().toLowerCase() === 'true') {
+            return false;
+        }
+
+        const charmSize = Math.floor(Number(charm.CharmSize ?? 0));
+        if (!Number.isFinite(charmSize) || charmSize <= 0) {
+            return false;
+        }
+
+        // Building rank N unlocks recipe rank N + 1, as authored in BuildingTypes.
+        return charmSize <= ForgeHandler.getAuthoritativeForgeRank(character) + 1;
     }
 
     private static getCraftTimeBonusPercent(character: any): number {
@@ -618,7 +648,7 @@ export class ForgeHandler {
     }
 
     static async handleStartForge(client: Client, data: Buffer): Promise<void> {
-        if (!client.character) {
+        if (!client.character || ForgeHandler.rejectsVisitedHomeMutation(client)) {
             return;
         }
 
@@ -635,18 +665,26 @@ export class ForgeHandler {
 
         const consumableFlags = Array.from({ length: 4 }, () => br.readMethod15());
 
-        const materials = normalizeCharacterMaterials(client.character);
-        for (const [materialId, count] of materialsUsed.entries()) {
-            if (materialId <= 0 || count <= 0) {
-                continue;
-            }
+        const charm = ForgeHandler.getCharacterCharmEntry(primary);
+        const forgeState = ForgeHandler.ensureForgeState(client.character);
+        if (
+            primary <= 0 ||
+            !ForgeHandler.canCraftCharm(client.character, charm) ||
+            Number(forgeState.primary ?? 0) > 0
+        ) {
+            return;
+        }
 
+        const materials = normalizeMaterialEntries(client.character.materials);
+        for (const [materialId, count] of materialsUsed.entries()) {
+            if (materialId <= 0 || count <= 0 || !ForgeHandler.getMaterialEntry(materialId)) {
+                return;
+            }
             const entry = materials.find((material: any) => Number(material?.materialID ?? 0) === materialId);
-            if (entry) {
-                entry.count = Math.max(0, Number(entry.count ?? 0) - count);
+            if (!entry || Number(entry.count ?? 0) < count) {
+                return;
             }
         }
-        normalizeCharacterMaterials(client.character);
 
         const consumableIds = [
             ConsumableID.MinorRareCatalyst,
@@ -655,6 +693,23 @@ export class ForgeHandler {
             ConsumableID.MajorLegendaryCatalyst
         ];
         const consumables = Array.isArray(client.character.consumables) ? client.character.consumables : [];
+
+        for (const [index, consumableId] of consumableIds.entries()) {
+            if (!consumableFlags[index]) {
+                continue;
+            }
+
+            const entry = consumables.find((consumable: any) => Number(consumable?.consumableID ?? 0) === consumableId);
+            if (!entry || Number(entry.count ?? 0) < 1) {
+                return;
+            }
+        }
+
+        for (const [materialId, count] of materialsUsed.entries()) {
+            const entry = materials.find((material: any) => Number(material?.materialID ?? 0) === materialId)!;
+            entry.count = Number(entry.count ?? 0) - count;
+        }
+        client.character.materials = materials.filter((entry) => entry.count > 0);
         client.character.consumables = consumables;
 
         for (const [index, consumableId] of consumableIds.entries()) {
@@ -663,14 +718,7 @@ export class ForgeHandler {
             }
 
             const entry = consumables.find((consumable: any) => Number(consumable?.consumableID ?? 0) === consumableId);
-            if (entry) {
-                entry.count = Math.max(0, Number(entry.count ?? 0) - 1);
-            } else {
-                consumables.push({
-                    consumableID: consumableId,
-                    count: 0
-                });
-            }
+            entry!.count = Number(entry!.count ?? 0) - 1;
 
             sendConsumableUpdate(client, consumableId);
         }
@@ -685,8 +733,6 @@ export class ForgeHandler {
             Array.from(materialsUsed.keys())
         );
         const usedlist = secondary >= 1 && secondary <= 9 ? (1 << (secondary - 1)) : 0;
-        const forgeState = ForgeHandler.ensureForgeState(client.character);
-
         forgeState.primary = primary;
         forgeState.secondary = secondary;
         forgeState.ReadyTime = readyTime;
@@ -709,7 +755,7 @@ export class ForgeHandler {
     }
 
     static async handleForgeSpeedUpPacket(client: Client, data: Buffer): Promise<void> {
-        if (!client.character) {
+        if (!client.character || ForgeHandler.rejectsVisitedHomeMutation(client)) {
             return;
         }
 
@@ -774,7 +820,7 @@ export class ForgeHandler {
     }
 
     static async handleCollectForgeCharm(client: Client, data: Buffer): Promise<void> {
-        if (!client.character) {
+        if (!client.character || ForgeHandler.rejectsVisitedHomeMutation(client)) {
             return;
         }
 
@@ -827,7 +873,7 @@ export class ForgeHandler {
     }
 
     static async handleCancelForge(client: Client, data: Buffer): Promise<void> {
-        if (!client.character) {
+        if (!client.character || ForgeHandler.rejectsVisitedHomeMutation(client)) {
             return;
         }
 
@@ -855,6 +901,10 @@ export class ForgeHandler {
             return;
         }
 
+        if (ForgeHandler.rejectsVisitedHomeMutation(client)) {
+            return;
+        }
+
         if (String(consumableDef.Type ?? '') !== ConsumableType.ForgeXP) {
             return;
         }
@@ -876,7 +926,7 @@ export class ForgeHandler {
     }
 
     static async handleAllocateMagicForgeArtisanSkillPoints(client: Client, data: Buffer): Promise<void> {
-        if (!client.character) {
+        if (!client.character || ForgeHandler.rejectsVisitedHomeMutation(client)) {
             return;
         }
 
@@ -887,7 +937,7 @@ export class ForgeHandler {
     }
 
     static async handleMagicForgeReroll(client: Client, data: Buffer): Promise<void> {
-        if (!client.character) {
+        if (!client.character || ForgeHandler.rejectsVisitedHomeMutation(client)) {
             return;
         }
 
