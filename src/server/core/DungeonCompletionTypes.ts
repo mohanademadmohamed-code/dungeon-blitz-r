@@ -12,7 +12,7 @@ export type DungeonCompletionCutsceneCondition = {
 
 export type DungeonCompletionCondition = {
     mode: DungeonCompletionMode;
-    partyHostileSync?: 'all' | 'bosses-only';
+    partyHostileSync?: 'all' | 'bosses-only' | 'none';
     bossGroups?: string[][];
     bossAliases?: Record<string, string>;
     entityObjectives?: DungeonCompletionEntityObjective[];
@@ -22,6 +22,8 @@ export type DungeonCompletionCondition = {
     allowDefeatedBossProxyCopies?: boolean;
     requirePlayerDamageForClientBosses?: boolean;
     clientAuthorityBosses?: string[];
+    requireRoomBossMarker?: boolean;
+    allowVerifiedClientBossWithoutRoomBossMarker?: boolean;
 };
 
 export type DungeonCompletionPhase =
@@ -31,6 +33,15 @@ export type DungeonCompletionPhase =
     | 'ready'
     | 'finalizing'
     | 'completed';
+
+export type DungeonCompletionCutsceneState = {
+    roomId: number;
+    startedAt: number;
+    endedAt: number;
+    startedSequence: number;
+    endedSequence: number;
+    completionEligibleAtStart: boolean;
+};
 
 export type DungeonCompletionRunState = {
     levelScope: string;
@@ -50,11 +61,14 @@ export type DungeonCompletionRunState = {
     cutsceneEndedAt: number;
     cutsceneStartedSequence: number;
     cutsceneEndedSequence: number;
+    cutscenesByRoom: Map<number, DungeonCompletionCutsceneState>;
+    objectiveRoomIds: Set<number>;
     objectivesMetAt: number;
     objectivesMetSequence: number;
     readyAt: number;
     finalizingParticipants: Set<string>;
     completedParticipants: Set<string>;
+    enrolledParticipants: Set<string>;
     completionRequestCount: number;
 };
 

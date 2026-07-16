@@ -56,6 +56,8 @@ import { getCharacterRuntimeLevel, getPartyRuntimeLevelForClient } from '../core
 import { getCraftTownHomeInstanceId } from '../utils/HomeVisitGuard';
 import { TutorialDungeonMechanics } from '../core/TutorialDungeonMechanics';
 import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
+import { DungeonCompletionConditions } from '../core/DungeonCompletionConditions';
+import { MovementAuthority } from '../core/MovementAuthority';
 
 const db = new JsonAdapter();
 
@@ -1360,6 +1362,7 @@ export class LevelHandler {
             }
             LevelHandler.markRoomEventStarted(other, roomId);
             MissionHandler.noteDungeonCutsceneStart(other, roomId);
+            MovementAuthority.resetFromEntity(other, other.entities.get(other.clientEntID), 'cutscene_start');
             other.send(0xA5, payload);
         }
         LevelHandler.setServerAuthorityHostilesUntargetableForScope(scopeKey, roomId, true);
@@ -1399,6 +1402,7 @@ export class LevelHandler {
             if (!other.playerSpawned || getClientLevelScope(other) !== scopeKey) {
                 continue;
             }
+            MovementAuthority.resetFromEntity(other, other.entities.get(other.clientEntID), 'cutscene_end');
             other.send(0xA6, payload);
             MissionHandler.noteDungeonCutsceneEnd(other, roomId);
         }
@@ -2720,6 +2724,7 @@ export class LevelHandler {
         EntityHandler.removeOwnedEntities(client);
         client.clientEntID = 0;
         client.playerSpawned = false;
+        MovementAuthority.reset(client, 'level_transfer_clear');
         client.pendingLoot.clear();
         client.processedRewardSources.clear();
         client.triggeredLevelStates.clear();
@@ -3407,6 +3412,7 @@ export class LevelHandler {
         state?.participantKeys?.add(DungeonCompletionSystem.getParticipantKey(client));
         LevelHandler.markRoomEventStarted(client, roomId);
         MissionHandler.noteDungeonCutsceneStart(client, roomId);
+        MovementAuthority.resetFromEntity(client, client.entities.get(client.clientEntID), 'cutscene_start');
         EntityHandler.sendTutorialDungeonWorldSnapshot(client, 'cutscene_start');
     }
 
@@ -3457,6 +3463,7 @@ export class LevelHandler {
         sendToSource: boolean = false
     ): void {
         for (const other of LevelHandler.getSharedDungeonCutsceneParticipants(sourceClient, roomId, true)) {
+            MovementAuthority.resetFromEntity(other, other.entities.get(other.clientEntID), 'cutscene_end');
             if (sendToSource || other !== sourceClient) {
                 other.send(0xA6, payload);
             }
@@ -4070,7 +4077,7 @@ export class LevelHandler {
     }
 
     private static shouldSendExtendedOnTransfer(targetLevel: string): boolean {
-        return false;
+        return targetLevel === 'CraftTown';
     }
 
     private static isDifferentCharacter(left: Character | null | undefined, right: Character | null | undefined): boolean {
@@ -4083,13 +4090,15 @@ export class LevelHandler {
         client: Client,
         transferToken: number,
         activeCharacter: Character,
-        targetLevel: string
+        targetLevel: string,
+        explicitHostCharacter: Character | null = null
     ): Character {
         if (targetLevel !== 'CraftTown') {
+            client.craftTownHostCharacter = null;
             return activeCharacter;
         }
 
-        const queuedHost = GlobalState.houseVisits.get(transferToken);
+        const queuedHost = explicitHostCharacter ?? GlobalState.houseVisits.get(transferToken);
         if (queuedHost) {
             GlobalState.houseVisits.delete(transferToken); // Consume
             if (LevelHandler.isDifferentCharacter(activeCharacter, queuedHost)) {
@@ -4100,11 +4109,6 @@ export class LevelHandler {
 
             client.craftTownHostCharacter = null;
             return activeCharacter;
-        }
-
-        if (LevelHandler.isDifferentCharacter(activeCharacter, client.craftTownHostCharacter)) {
-            console.log(`[Level] House Visit active from session host! Host: ${client.craftTownHostCharacter!.name}`);
-            return client.craftTownHostCharacter!;
         }
 
         client.craftTownHostCharacter = null;
@@ -4786,9 +4790,12 @@ export class LevelHandler {
         const br = new BitReader(data);
         const entityId = br.readMethod4();
         const speedScaled = br.readMethod4();
-        const behaviorSpeedMod = speedScaled / 10000;
+        const behaviorSpeedMod = Math.max(0, Math.min(2.5, speedScaled / 10000));
 
         const entity = client.entities.get(entityId);
+        if (!entity || !EntityHandler.isClientOwnPlayerEntity(client, getClientLevelScope(client), entityId, entity)) {
+            return;
+        }
         if (entity) {
             entity.behaviorSpeedMod = behaviorSpeedMod;
         }
@@ -4929,10 +4936,6 @@ export class LevelHandler {
             console.error(`[Level] Character state disappeared during transfer. Token=${packetToken}`);
             return;
         }
-        if (targetLevel === 'CraftTown' && teleportOverride?.craftTownHostCharacter) {
-            client.craftTownHostCharacter = teleportOverride.craftTownHostCharacter;
-        }
-
         const oldLevel = LevelHandler.resolveTransferSourceLevel(client, activeCharacter);
         const ent = client.entities.get(client.clientEntID);
         let oldX = 0, oldY = 0;
@@ -4979,7 +4982,8 @@ export class LevelHandler {
             client,
             transferToken,
             activeCharacter,
-            targetLevel
+            targetLevel,
+            teleportOverride?.craftTownHostCharacter ?? null
         );
 
         // 7. Store Pending Transfer State
@@ -5142,6 +5146,74 @@ export class LevelHandler {
         const isSelf =
             EntityHandler.isClientOwnPlayerEntity(client, getClientLevelScope(client), entityId, ent) ||
             EntityHandler.isClientOwnPlayerEntity(client, getClientLevelScope(client), rawEntityId, ent);
+        if (!isSelf && Boolean((levelEntity ?? ent)?.isPlayer)) {
+            return;
+        }
+        if (isSelf && !isDefeatEntState) {
+            const nowMs = MovementAuthority.nowMs();
+            const movementResult = MovementAuthority.validateIncrementalMovement(
+                client,
+                ent,
+                deltaX,
+                deltaY,
+                nowMs,
+                [deltaVX, velocityY]
+            );
+            if (!movementResult.accepted) {
+                const cappedMovement = MovementAuthority.commitCappedRejectedMovement(client, movementResult, nowMs);
+                if (cappedMovement.clamped) {
+                    ent.x = cappedMovement.x;
+                    ent.y = cappedMovement.y;
+                    ent.v = Number(ent.v ?? 0);
+                    ent.entState = entState;
+                    ent.dead = false;
+                    ent.facingLeft = flags.bLeft;
+                    ent.bRunning = flags.bRunning;
+                    ent.bJumping = flags.bJumping;
+                    ent.bDropping = flags.bDropping;
+                    ent.bBackpedal = flags.bBackpedal;
+                    ent.velocityY = velocityY;
+                    ent.airborne = isAirborne;
+                    if (levelEntity && levelEntity !== ent) {
+                        levelEntity.x = cappedMovement.x;
+                        levelEntity.y = cappedMovement.y;
+                        levelEntity.v = Number(levelEntity.v ?? 0);
+                        levelEntity.entState = entState;
+                        levelEntity.dead = false;
+                        levelEntity.facingLeft = flags.bLeft;
+                        levelEntity.bRunning = flags.bRunning;
+                        levelEntity.bJumping = flags.bJumping;
+                        levelEntity.bDropping = flags.bDropping;
+                        levelEntity.bBackpedal = flags.bBackpedal;
+                        levelEntity.velocityY = velocityY;
+                        levelEntity.airborne = isAirborne;
+                    }
+                    const { CombatHandler } = require('./CombatHandler') as typeof import('./CombatHandler');
+                    CombatHandler.notePlayerActiveMovementState(client);
+                }
+                const correctionX = cappedMovement.clamped ? cappedMovement.x : movementResult.lastAcceptedX;
+                const correctionY = cappedMovement.clamped ? cappedMovement.y : movementResult.lastAcceptedY;
+                const correctionDeltaX = Math.round(correctionX - movementResult.attemptedX);
+                const correctionDeltaY = Math.round(correctionY - movementResult.attemptedY);
+                if (correctionDeltaX !== 0 || correctionDeltaY !== 0) {
+                    MovementAuthority.armCorrectionGrace(client);
+                    client.send(
+                        0x07,
+                        LevelHandler.buildEntityIncrementalUpdatePayload(
+                            rawEntityId,
+                            correctionDeltaX,
+                            correctionDeltaY,
+                            0,
+                            entState,
+                            flags,
+                            false,
+                            0
+                        )
+                    );
+                }
+                return;
+            }
+        }
         const canonicalEntity = levelEntity ?? ent;
         const isEnemyCanonical =
             !isSelf &&
@@ -5150,10 +5222,35 @@ export class LevelHandler {
             Number(canonicalEntity.team ?? 0) === EntityTeam.ENEMY;
         const canonicalHp = Math.round(Number(canonicalEntity?.hp ?? 1));
         const canonicalDestroyed = Boolean(canonicalEntity?.destroyed);
+        const acceptsClientAuthorityTerminal = Boolean(
+            isEnemyCanonical &&
+            isDefeatEntState &&
+            DungeonCompletionConditions.isClientAuthorityBoss(
+                currentLevel,
+                canonicalEntity,
+                getClientLevelScope(client)
+            )
+        );
         const canonicalTerminal = isEnemyCanonical && (
             canonicalDestroyed ||
             (Number.isFinite(canonicalHp) && canonicalHp <= 0)
         );
+        if (acceptsClientAuthorityTerminal) {
+            for (const acceptedEntity of new Set([canonicalEntity, ent])) {
+                if (!acceptedEntity || typeof acceptedEntity !== 'object') {
+                    continue;
+                }
+                acceptedEntity.hp = 0;
+                acceptedEntity.dead = true;
+                acceptedEntity.entState = EntityState.DEAD;
+                acceptedEntity.clientDefeatVerified = true;
+                const maxHp = Math.max(0, Math.round(Number(acceptedEntity.maxHp ?? 0)));
+                if (maxHp > 0) {
+                    acceptedEntity.healthDelta = -maxHp;
+                    acceptedEntity.health_delta = -maxHp;
+                }
+            }
+        }
         if (canonicalTerminal) {
             const previousLocalHpValue = Number(ent?.hp ?? NaN);
             const previousLocalHp = Number.isFinite(previousLocalHpValue)
@@ -5196,11 +5293,24 @@ export class LevelHandler {
                 'terminal_entity_incremental_rejected',
                 rawEntityId
             );
+            const levelScope = getClientLevelScope(client);
+            if (
+                isDefeatEntState &&
+                DungeonCompletionConditions.isRequiredBoss(currentLevel, canonicalEntity, levelScope)
+            ) {
+                canonicalEntity.clientDefeatVerified = true;
+                LevelHandler.deferMissionWork(
+                    client,
+                    'terminal dungeon boss completion',
+                    () => MissionHandler.handleForcedDungeonBossCompletion(client, canonicalEntity)
+                );
+            }
             return;
         }
         if (
             isEnemyCanonical &&
             isDefeatEntState &&
+            !acceptsClientAuthorityTerminal &&
             Number.isFinite(canonicalHp) &&
             canonicalHp > 0
         ) {
@@ -5404,7 +5514,11 @@ export class LevelHandler {
         const shouldIgnoreUnverifiedDungeonBossDeadState =
             isEnemyEntity &&
             isDefeatEntState &&
-            MissionHandler.shouldIgnoreUnverifiedDungeonBossDefeat(currentLevel, levelEntity ?? ent);
+            MissionHandler.shouldIgnoreUnverifiedDungeonBossDefeat(
+                currentLevel,
+                levelEntity ?? ent,
+                getClientLevelScope(client)
+            );
         const canonicalEntState = shouldIgnoreUnverifiedDungeonBossDeadState
             ? EntityState.ACTIVE
             : entState;
@@ -5441,6 +5555,11 @@ export class LevelHandler {
             levelEntity.bBackpedal = flags.bBackpedal;
             levelEntity.velocityY = velocityY;
             levelEntity.airborne = isAirborne;
+        }
+
+        if (isActiveSelfState) {
+            const { CombatHandler } = require('./CombatHandler') as typeof import('./CombatHandler');
+            CombatHandler.notePlayerActiveMovementState(client);
         }
         
         // Update Saved Coords if it's us and safe level

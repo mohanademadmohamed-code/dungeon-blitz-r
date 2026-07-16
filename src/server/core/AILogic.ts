@@ -9,6 +9,8 @@ import { Client } from './Client';
 import { sharesRoomIds } from './PartySync';
 import { getClientLevelScope, getScopeLevelName } from './LevelScope';
 import { LevelConfig } from './LevelConfig';
+import { DungeonCompletionConditions } from './DungeonCompletionConditions';
+import { getRoomBossAwareRoomId, isRoomBossEntity } from './RoomBossState';
 
 
 export class AILogic {
@@ -27,8 +29,8 @@ export class AILogic {
     static readonly ENABLE_SERVER_AUTHORITY_HOSTILE_AI = process.env.ENABLE_SERVER_AUTHORITY_HOSTILE_AI === '1';
 
     private static hasCombatPull(npc: any): boolean {
-        return Math.max(0, Math.round(Number(npc?.lastCombatActivityAt ?? 0))) > 0 ||
-            Math.max(0, Math.round(Number(npc?.aggroTargetEntityId ?? 0))) > 0;
+        return Math.max(0, Math.round(Number(npc?.aggroTargetEntityId ?? 0))) > 0 ||
+            Math.max(0, Math.round(Number(npc?.aggroTargetToken ?? 0))) > 0;
     }
 
     private static clearAggroTarget(npc: any): void {
@@ -43,12 +45,16 @@ export class AILogic {
 
     private static clearDeadAggroTarget(npc: any, players: Client[], levelScope: string): void {
         const aggroTargetEntityId = Math.max(0, Math.round(Number(npc?.aggroTargetEntityId ?? 0)));
-        if (aggroTargetEntityId <= 0) {
+        const aggroTargetToken = Math.max(0, Math.round(Number(npc?.aggroTargetToken ?? 0)));
+        if (aggroTargetEntityId <= 0 && aggroTargetToken <= 0) {
             return;
         }
 
-        const target = players.find((player) => player.clientEntID === aggroTargetEntityId);
-        if (target && CombatHandler.isPlayerDeadForCombat(target, levelScope)) {
+        const target = players.find((player) =>
+            (aggroTargetEntityId > 0 && player.clientEntID === aggroTargetEntityId) ||
+            (aggroTargetToken > 0 && player.token === aggroTargetToken)
+        );
+        if (!target || CombatHandler.isPlayerDeadForCombat(target, levelScope)) {
             AILogic.clearAggroTarget(npc);
         }
     }
@@ -113,23 +119,26 @@ export class AILogic {
         let minDist = Number.MAX_VALUE;
         const npcX = npc.x || 0;
         const npcY = npc.y || 0;
-        const npcRoomId = Number.isFinite(Number(npc?.roomId)) ? Number(npc.roomId) : -1;
+        const npcRoomId = getRoomBossAwareRoomId(npc);
         const levelName = getScopeLevelName(levelScope);
         const entType = GameData.getEntType(npc.name);
         const isRanged = entType?.RangedPower ? true : false;
-        const isBoss = AILogic.isBossLike(npc);
+        const isBoss = DungeonCompletionConditions.isRequiredBoss(levelName, npc, levelScope) ||
+            isRoomBossEntity(levelScope, npc);
         const isDungeonLevel = LevelConfig.isDungeonLevel(levelName);
         AILogic.clearDeadAggroTarget(npc, players, levelScope);
         const aggroTargetEntityId = Math.max(0, Math.round(Number(npc?.aggroTargetEntityId ?? 0)));
+        const aggroTargetToken = Math.max(0, Math.round(Number(npc?.aggroTargetToken ?? 0)));
 
-        if (isDungeonLevel && !isBoss && !AILogic.hasCombatPull(npc)) {
+        if (isDungeonLevel && !AILogic.hasCombatPull(npc)) {
             return;
         }
 
         for (const p of players) {
             if (!p.character || !p.character.CurrentLevel) continue;
             if (CombatHandler.isPlayerDeadForCombat(p, levelScope)) continue;
-            if (!isBoss && aggroTargetEntityId > 0 && p.clientEntID !== aggroTargetEntityId) continue;
+            if (aggroTargetEntityId > 0 && p.clientEntID !== aggroTargetEntityId) continue;
+            if (aggroTargetToken > 0 && p.token !== aggroTargetToken) continue;
             const playerRoomId = Number.isFinite(Number(p.currentRoomId)) ? Math.round(Number(p.currentRoomId)) : -1;
             if (isBoss) {
                 if (playerRoomId < 0 || npcRoomId < 0 || playerRoomId !== Math.round(npcRoomId)) continue;
@@ -147,7 +156,7 @@ export class AILogic {
         }
 
         if (!target || !target.character || !target.character.CurrentLevel) {
-            if (isBoss && aggroTargetEntityId > 0) {
+            if (AILogic.hasCombatPull(npc)) {
                 AILogic.clearAggroTarget(npc);
             }
             return;

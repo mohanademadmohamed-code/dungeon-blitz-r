@@ -192,9 +192,59 @@ async function testNonDungeonDefeatRemainsLocalToReportingClient(): Promise<void
     }
 }
 
+async function testAuthoredDungeonSideQuestVariants(): Promise<void> {
+    ensureDataLoaded();
+    const cases: Array<[MissionID, string]> = [
+        [MissionID.GetLizardBanners, 'GreatLizardBanner'],
+        [MissionID.GetLizardBanners, 'GreatLizardBanner2'],
+        [MissionID.GetLizardBannersHard, 'GreatLizardBannerHard'],
+        [MissionID.GetLizardBannersHard, 'GreatLizardBanner2Hard'],
+        [MissionID.GetLizardGreatHelm, 'GreatLizardHeavy'],
+        [MissionID.GetLizardGreatHelm, 'GreatLizardHeavy2'],
+        [MissionID.GetLizardGreatHelmHard, 'GreatLizardHeavyHard'],
+        [MissionID.GetLizardGreatHelmHard, 'GreatLizardHeavy2Hard'],
+        [MissionID.SpiritProblem, 'CastleLizardBanner2'],
+        [MissionID.SpiritProblem, 'CastleLizardMaster'],
+        [MissionID.SpiritProblemHard, 'CastleLizardBanner2Hard'],
+        [MissionID.SpiritProblemHard, 'CastleLizardMasterHard']
+    ];
+
+    for (let index = 0; index < cases.length; index++) {
+        const [missionId, enemyName] = cases[index];
+        const client = createClient(94_000 + index, `Variant${index}`, false);
+        client.character.missions[String(missionId)] = { state: 1, currCount: 0 };
+        const enemy = {
+            id: 95_000 + index,
+            EntName: enemyName,
+            characterName: `,${enemyName}`,
+            team: EntityTeam.ENEMY,
+            entState: EntityState.DEAD,
+            hp: 0,
+            dead: true,
+            destroyed: true
+        };
+        GlobalState.sessionsByToken.set(client.token, client as never);
+        try {
+            await MissionHandler.handleEnemyDefeatMissionProgressForScope(
+                client as never,
+                getClientLevelScope(client as never),
+                enemy
+            );
+            assert.equal(
+                client.character.missions[String(missionId)].currCount,
+                1,
+                `${enemyName} did not count for side quest ${missionId}`
+            );
+        } finally {
+            GlobalState.sessionsByToken.delete(client.token);
+        }
+    }
+}
+
 Promise.resolve()
     .then(testDungeonDefeatAwardsEveryEligibleQuestHolder)
     .then(testNonDungeonDefeatRemainsLocalToReportingClient)
+    .then(testAuthoredDungeonSideQuestVariants)
     .then(() => {
         console.log('Dungeon side-quest material regression tests passed.');
     })

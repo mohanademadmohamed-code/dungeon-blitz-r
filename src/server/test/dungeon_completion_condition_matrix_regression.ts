@@ -15,7 +15,11 @@ type Scenario = {
     entities: any[];
 };
 
-function makeEntity(id: number, name: string, options: { clientSpawned?: boolean } = {}): any {
+function makeEntity(
+    id: number,
+    name: string,
+    options: { clientSpawned?: boolean; roomBoss?: boolean } = {}
+): any {
     return {
         id,
         name,
@@ -26,6 +30,10 @@ function makeEntity(id: number, name: string, options: { clientSpawned?: boolean
         entState: EntityState.ACTIVE,
         team: EntityTeam.ENEMY,
         clientSpawned: Boolean(options.clientSpawned),
+        isRoomBoss: Boolean(options.roomBoss),
+        roomBoss: Boolean(options.roomBoss),
+        roomBossRoomId: options.roomBoss ? 99 : undefined,
+        roomBossName: options.roomBoss ? name : undefined,
         playerDamageContributed: true,
         lifeNonce: 1
     };
@@ -43,7 +51,8 @@ function createScenario(levelName: string, suffix: string): Scenario {
         for (const group of condition.bossGroups ?? []) {
             const bossName = group[0];
             entities.push(makeEntity(nextEntityId++, bossName, {
-                clientSpawned: Boolean(condition.clientAuthorityBosses?.includes(bossName))
+                clientSpawned: Boolean(condition.clientAuthorityBosses?.includes(bossName)),
+                roomBoss: Boolean(condition.requireRoomBossMarker)
             }));
         }
         for (const objective of condition.entityObjectives ?? []) {
@@ -218,6 +227,25 @@ const NEVER_ENDING_DUNGEON_LEVELS = [
     'JC_Mission9Hard'
 ] as const;
 
+const AUTHORED_ENDING_GATE_LEVELS = [
+    'SD_Mission4',
+    'SD_Mission4Hard',
+    'OMM_Mission7',
+    'OMM_Mission7Hard',
+    'OMM_Mission8',
+    'OMM_Mission8Hard',
+    'OMM_Mission9',
+    'OMM_Mission9Hard',
+    'OMM_Mission11',
+    'OMM_Mission11Hard',
+    'EG_Mission1',
+    'EG_Mission1Hard',
+    'EG_Mission2',
+    'EG_Mission2Hard',
+    'EG_Mission3',
+    'EG_Mission3Hard'
+] as const;
+
 function satisfyObjectivesAfterIntroCutscene(
     scenario: Scenario,
     participantKey: string,
@@ -255,28 +283,20 @@ function verifyIntroCutsceneDoesNotPermanentlyBlockCompletion(
         scenario.levelScope,
         baseTime + scenario.entities.length + 10
     );
-    if (scenario.condition.cutscene?.requiredAfterObjectives) {
-        assert.strictEqual(
-            beforeClose.ready,
-            false,
-            `${levelName}: explicit post-objective cutscene gate was bypassed`
-        );
-        assert.strictEqual(
-            DungeonCompletionSystem.noteCutsceneEnd(
-                scenario.levelScope,
-                7,
-                baseTime + scenario.entities.length + 11
-            ),
-            true,
-            `${levelName}: pre-objective intro close after objectives did not release the explicit gate`
-        );
-    } else {
-        assert.strictEqual(
-            beforeClose.ready,
-            true,
-            `${levelName}: unmatched pre-objective intro cutscene permanently blocked completion`
-        );
-    }
+    assert.strictEqual(
+        beforeClose.ready,
+        false,
+        `${levelName}: completion bypassed an active authoritative cutscene`
+    );
+    assert.strictEqual(
+        DungeonCompletionSystem.noteCutsceneEnd(
+            scenario.levelScope,
+            7,
+            baseTime + scenario.entities.length + 11
+        ),
+        true,
+        `${levelName}: completion did not release after the active cutscene closed`
+    );
 
     cleanupScenario(scenario);
 }
@@ -341,6 +361,104 @@ function runScenario(levelName: string, participantCount: 1 | 2, ordinal: number
     cleanupScenario(scenario);
 }
 
+function verifyOverlappingAndReorderedCutscenes(): void {
+    const overlapping = createScenario('OMM_Mission2', 'overlapping-cutscenes');
+    const boss = overlapping.entities[0];
+    boss.roomId = 11;
+    DungeonCompletionSystem.noteCutsceneStart(overlapping.levelScope, 11, 10_000);
+    DungeonCompletionSystem.noteCutsceneStart(overlapping.levelScope, 5, 10_001);
+    defeatEntity(overlapping, boss, 10_002);
+    assert.equal(
+        DungeonCompletionSystem.noteCutsceneEnd(overlapping.levelScope, 5, 10_003),
+        false,
+        'ending an unrelated overlapping cutscene released completion while the boss cutscene remained active'
+    );
+    assert.equal(
+        DungeonCompletionSystem.noteCutsceneEnd(overlapping.levelScope, 11, 10_004),
+        true,
+        'boss cutscene close did not release completion after another room overlapped it'
+    );
+    cleanupScenario(overlapping);
+
+    const reordered = createScenario('OMM_Mission2', 'reordered-cutscene');
+    const reorderedBoss = reordered.entities[0];
+    reorderedBoss.roomId = 11;
+    DungeonCompletionSystem.noteCutsceneStart(reordered.levelScope, 11, 20_000, true);
+    DungeonCompletionSystem.noteCutsceneEnd(reordered.levelScope, 11, 20_100);
+    defeatEntity(reordered, reorderedBoss, 20_101);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(reordered.levelScope, 20_102).ready,
+        true,
+        'late final HP/death report after cutscene close left completion waiting forever'
+    );
+    cleanupScenario(reordered);
+}
+
+function verifyAuthoredEndingGate(levelName: string, ordinal: number): void {
+    const scenario = createScenario(levelName, `authored-ending-${ordinal}`);
+    const baseTime = 8_000_000 + ordinal * 1_000;
+    assert.equal(
+        scenario.condition.cutscene?.requiredAfterObjectives,
+        true,
+        `${levelName}: authored defeat cinematic is not required by the completion catalog`
+    );
+
+    DungeonCompletionSystem.noteCutsceneStart(scenario.levelScope, 7, baseTime);
+    DungeonCompletionSystem.noteCutsceneEnd(scenario.levelScope, 7, baseTime + 1);
+    scenario.entities.forEach((entity, index) => defeatEntity(scenario, entity, baseTime + 10 + index));
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scenario.levelScope, baseTime + 30).ready,
+        false,
+        `${levelName}: intro cinematic incorrectly satisfied the post-boss ending gate`
+    );
+
+    DungeonCompletionSystem.noteCutsceneStart(scenario.levelScope, 7, baseTime + 31);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scenario.levelScope, baseTime + 32).ready,
+        false,
+        `${levelName}: completed while its authored defeat cinematic was active`
+    );
+    assert.equal(
+        DungeonCompletionSystem.noteCutsceneEnd(scenario.levelScope, 7, baseTime + 33),
+        true,
+        `${levelName}: did not complete after its authored defeat cinematic ended`
+    );
+    cleanupScenario(scenario);
+}
+
+function verifyGrowingFlameRequiresBothBosses(): void {
+    for (const levelName of ['OMM_Mission9', 'OMM_Mission9Hard']) {
+        const scenario = createScenario(levelName, 'double-boss');
+        assert.equal(scenario.entities.length, 2, `${levelName}: catalog does not expose both authored bosses`);
+        defeatEntity(scenario, scenario.entities[0], 9_000_000);
+        assert.equal(
+            DungeonCompletionSystem.evaluate(scenario.levelScope, 9_000_001).objectivesMet,
+            false,
+            `${levelName}: completed after only one member of the authored double-boss fight died`
+        );
+        cleanupScenario(scenario);
+    }
+}
+
+function verifyAshenMotherClientAuthorityAliases(): void {
+    for (const [levelName, expectedCanonical] of [
+        ['EG_Mission1', 'AshenDryadWizard'],
+        ['EG_Mission1Hard', 'AshenDryadWizardHard']
+    ] as const) {
+        const entity = { name: 'Ashen Mother', displayName: 'Ashen Mother', clientSpawned: true };
+        assert.equal(
+            DungeonCompletionConditions.getCanonicalBossName(levelName, entity),
+            expectedCanonical,
+            `${levelName}: Ashen Mother display alias did not resolve to the completion boss`
+        );
+        assert.equal(
+            DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity),
+            true,
+            `${levelName}: authored Ashen Mother client death is not accepted`
+        );
+    }
+}
+
 function main(): void {
     const dataDir = path.resolve(__dirname, '..', 'data');
     LevelConfig.load(dataDir);
@@ -360,6 +478,10 @@ function main(): void {
     NEVER_ENDING_DUNGEON_LEVELS.forEach((levelName, index) => {
         verifyIntroCutsceneDoesNotPermanentlyBlockCompletion(levelName, index);
     });
+    verifyOverlappingAndReorderedCutscenes();
+    AUTHORED_ENDING_GATE_LEVELS.forEach(verifyAuthoredEndingGate);
+    verifyGrowingFlameRequiresBothBosses();
+    verifyAshenMotherClientAuthorityAliases();
 
     assert.strictEqual(GlobalState.dungeonCompletions.size, 0, 'Matrix leaked dungeon completion states');
     console.log(

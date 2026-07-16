@@ -10,6 +10,9 @@ import { GlobalState } from './GlobalState';
 import { getClientLevelScope, getScopeLevelName } from './LevelScope';
 import { getSharedDungeonProgressTotals } from './SharedDungeonProgress';
 import { TutorialDungeonMechanics } from './TutorialDungeonMechanics';
+import { getRoomBossAwareRoomId } from './RoomBossState';
+
+const CUTSCENE_OBJECTIVE_REORDER_TOLERANCE_MS = 15_000;
 
 function getEntityId(entity: any): number {
     return Math.max(0, Math.round(Number(entity?.id ?? entity?.canonicalId ?? entity?.entId ?? entity?.EntityID ?? 0)));
@@ -48,11 +51,14 @@ function createRunState(levelScope: string, levelName: string, now: number): Dun
         cutsceneEndedAt: 0,
         cutsceneStartedSequence: 0,
         cutsceneEndedSequence: 0,
+        cutscenesByRoom: new Map(),
+        objectiveRoomIds: new Set(),
         objectivesMetAt: 0,
         objectivesMetSequence: 0,
         readyAt: 0,
         finalizingParticipants: new Set<string>(),
         completedParticipants: new Set<string>(),
+        enrolledParticipants: new Set<string>(),
         completionRequestCount: 0
     };
 }
@@ -83,11 +89,24 @@ export class DungeonCompletionSystem {
         }
         const existing = GlobalState.dungeonCompletions.get(scope);
         if (existing) {
+            DungeonCompletionSystem.enrollActiveParticipants(existing);
             return existing;
         }
         const created = createRunState(scope, levelName, now);
+        DungeonCompletionSystem.enrollActiveParticipants(created);
         GlobalState.dungeonCompletions.set(scope, created);
         return created;
+    }
+
+    private static enrollActiveParticipants(state: DungeonCompletionRunState): void {
+        if (state.objectivesMetAt > 0) {
+            return;
+        }
+        for (const session of GlobalState.sessionsByToken.values()) {
+            if (session.playerSpawned && session.character && getClientLevelScope(session) === state.levelScope) {
+                state.enrolledParticipants.add(DungeonCompletionSystem.getParticipantKey(session));
+            }
+        }
     }
 
     static reset(levelScope: string | null | undefined): void {
@@ -142,7 +161,7 @@ export class DungeonCompletionSystem {
 
         const entityId = getEntityId(entity);
         const lifeNonce = Math.max(0, Math.round(Number(entity?.lifeNonce ?? entity?.deathVersion ?? 0)));
-        const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity);
+        const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity, state.levelScope);
         const objectiveRole = DungeonCompletionConditions.getObjectiveRole(state.levelName, entity);
         const eventIdentity = canonicalBoss || objectiveRole || String(entity?.name ?? entity?.EntName ?? 'hostile');
         const tutorialAuthority = TutorialDungeonMechanics.isTutorialDungeon(state.levelName)
@@ -175,6 +194,12 @@ export class DungeonCompletionSystem {
         if (objectiveRole) {
             state.destroyedObjectives.add(objectiveRole);
         }
+        if (canonicalBoss || objectiveRole) {
+            const objectiveRoomId = getRoomBossAwareRoomId(entity);
+            if (objectiveRoomId >= 0) {
+                state.objectiveRoomIds.add(objectiveRoomId);
+            }
+        }
         DungeonCompletionSystem.evaluate(levelScope, now);
         return Boolean(canonicalBoss || objectiveRole || entityId > 0);
     }
@@ -198,7 +223,12 @@ export class DungeonCompletionSystem {
         DungeonCompletionSystem.evaluate(levelScope, now);
     }
 
-    static noteCutsceneStart(levelScope: string, roomId: number, now: number = Date.now()): void {
+    static noteCutsceneStart(
+        levelScope: string,
+        roomId: number,
+        now: number = Date.now(),
+        completionEligibleAtStart: boolean = false
+    ): void {
         const state = DungeonCompletionSystem.getOrCreateState(levelScope, now);
         if (!state) {
             return;
@@ -209,6 +239,14 @@ export class DungeonCompletionSystem {
         state.eventSequence += 1;
         state.cutsceneStartedSequence = state.eventSequence;
         state.cutsceneEndedSequence = 0;
+        state.cutscenesByRoom.set(state.cutsceneRoomId, {
+            roomId: state.cutsceneRoomId,
+            startedAt: now,
+            endedAt: 0,
+            startedSequence: state.cutsceneStartedSequence,
+            endedSequence: 0,
+            completionEligibleAtStart
+        });
         state.updatedAt = now;
         DungeonCompletionSystem.evaluate(levelScope, now);
     }
@@ -219,12 +257,29 @@ export class DungeonCompletionSystem {
             return false;
         }
         const endedRoomId = Math.max(0, Math.round(Number(roomId ?? 0)));
-        if (state.cutsceneRoomId > 0 && endedRoomId > 0 && state.cutsceneRoomId !== endedRoomId) {
+        const activeRoomState = state.cutscenesByRoom.get(endedRoomId);
+        if (!activeRoomState && state.cutsceneRoomId > 0 && endedRoomId > 0 && state.cutsceneRoomId !== endedRoomId) {
             return false;
         }
-        state.cutsceneEndedAt = now;
         state.eventSequence += 1;
-        state.cutsceneEndedSequence = state.eventSequence;
+        const roomState = activeRoomState ?? {
+            roomId: endedRoomId,
+            startedAt: now,
+            endedAt: 0,
+            startedSequence: state.eventSequence,
+            endedSequence: 0,
+            completionEligibleAtStart: false
+        };
+        roomState.endedAt = now;
+        roomState.endedSequence = state.eventSequence;
+        state.cutscenesByRoom.set(endedRoomId, roomState);
+        if (state.cutsceneRoomId === endedRoomId || state.cutsceneRoomId === 0) {
+            state.cutsceneRoomId = endedRoomId;
+            state.cutsceneStartedAt = roomState.startedAt;
+            state.cutsceneStartedSequence = roomState.startedSequence;
+            state.cutsceneEndedAt = now;
+            state.cutsceneEndedSequence = state.eventSequence;
+        }
         state.updatedAt = now;
         return DungeonCompletionSystem.evaluate(levelScope, now).ready;
     }
@@ -260,15 +315,25 @@ export class DungeonCompletionSystem {
             return { ready: false, phase: state.phase, reason: 'client_completion_signal_pending', objectivesMet: true, gateMet: false };
         }
 
-        const activeSharedCutscene = state.cutsceneStartedAt > 0 &&
-            state.cutsceneStartedSequence > state.objectivesMetSequence &&
-            state.cutsceneEndedSequence < state.cutsceneStartedSequence;
+        const relevantCutscenes = [...state.cutscenesByRoom.values()];
+        const activeSharedCutscene = relevantCutscenes.some((cutscene) =>
+            cutscene.startedAt > 0 && cutscene.endedSequence < cutscene.startedSequence
+        );
         let gateMet = !activeSharedCutscene;
         if (condition.cutscene?.requiredAfterObjectives) {
-            const sharedCutsceneEnded = state.cutsceneStartedAt > 0 &&
-                state.cutsceneEndedSequence >= state.cutsceneStartedSequence &&
-                state.cutsceneEndedSequence > state.objectivesMetSequence;
-            gateMet = sharedCutsceneEnded;
+            const sharedCutsceneEnded = relevantCutscenes.some((cutscene) =>
+                cutscene.startedAt > 0 &&
+                cutscene.endedSequence >= cutscene.startedSequence &&
+                cutscene.endedAt > 0 &&
+                (
+                    cutscene.endedSequence > state.objectivesMetSequence ||
+                    (
+                        cutscene.completionEligibleAtStart &&
+                        cutscene.endedAt + CUTSCENE_OBJECTIVE_REORDER_TOLERANCE_MS >= state.objectivesMetAt
+                    )
+                )
+            );
+            gateMet = !activeSharedCutscene && sharedCutsceneEnded;
         }
         if (!gateMet) {
             if (!finalizationPhase) {
@@ -317,17 +382,7 @@ export class DungeonCompletionSystem {
         state.completedParticipants.add(participantKey);
         state.updatedAt = Date.now();
 
-        const activeParticipantKeys = new Set<string>();
-        for (const session of GlobalState.sessionsByToken.values()) {
-            if (
-                session.playerSpawned &&
-                session.character &&
-                getClientLevelScope(session) === levelScope
-            ) {
-                activeParticipantKeys.add(DungeonCompletionSystem.getParticipantKey(session));
-            }
-        }
-        state.phase = [...activeParticipantKeys].every((key) => state.completedParticipants.has(key))
+        state.phase = [...state.enrolledParticipants].every((key) => state.completedParticipants.has(key))
             ? 'completed'
             : 'ready';
     }
@@ -352,7 +407,7 @@ export class DungeonCompletionSystem {
         const scopeEntities = [...(GlobalState.levelEntities.get(state.levelScope)?.values() ?? [])];
         if (Math.max(0, Number(condition.simultaneousBossWindowMs ?? 0)) > 0) {
             for (const entity of scopeEntities) {
-                const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity);
+                const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity, state.levelScope);
                 if (canonicalBoss && !isDefeated(entity)) {
                     state.defeatedBosses.delete(canonicalBoss);
                     state.defeatedBossAt.delete(canonicalBoss);
@@ -364,7 +419,7 @@ export class DungeonCompletionSystem {
             if (!isDefeated(entity)) {
                 continue;
             }
-            const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity);
+            const canonicalBoss = DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity, state.levelScope);
             if (canonicalBoss) {
                 state.defeatedBosses.add(canonicalBoss);
                 if (!state.defeatedBossAt.has(canonicalBoss)) {
@@ -375,6 +430,12 @@ export class DungeonCompletionSystem {
             if (objectiveRole) {
                 state.destroyedObjectives.add(objectiveRole);
             }
+            if (canonicalBoss || objectiveRole) {
+                const objectiveRoomId = getRoomBossAwareRoomId(entity);
+                if (objectiveRoomId >= 0) {
+                    state.objectiveRoomIds.add(objectiveRoomId);
+                }
+            }
             const entityId = getEntityId(entity);
             if (entityId > 0 && isTrackableHostile(entity)) {
                 state.defeatedHostileIds.add(entityId);
@@ -384,7 +445,7 @@ export class DungeonCompletionSystem {
         if (condition.mode === 'bosses' && condition.requirePlayerDamageForClientBosses) {
             for (const canonicalBoss of [...state.defeatedBosses]) {
                 const matchingEntity = [...(GlobalState.levelEntities.get(state.levelScope)?.values() ?? [])]
-                    .find((entity) => DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity) === canonicalBoss);
+                    .find((entity) => DungeonCompletionConditions.getCanonicalBossName(state.levelName, entity, state.levelScope) === canonicalBoss);
                 if (matchingEntity?.clientSpawned && !matchingEntity.playerDamageContributed) {
                     state.defeatedBosses.delete(canonicalBoss);
                     state.defeatedBossAt.delete(canonicalBoss);

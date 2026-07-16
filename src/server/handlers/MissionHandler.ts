@@ -123,16 +123,24 @@ export class MissionHandler {
         'SwampSpiderQueenHard'
     ]);
     private static readonly SWAMP_LIZARD_BANNER_KILL_NAMES = new Set([
-        'LizardBanner'
+        'LizardBanner',
+        'GreatLizardBanner',
+        'GreatLizardBanner2'
     ]);
     private static readonly SWAMP_LIZARD_BANNER_HARD_KILL_NAMES = new Set([
-        'LizardBannerHard'
+        'LizardBannerHard',
+        'GreatLizardBannerHard',
+        'GreatLizardBanner2Hard'
     ]);
     private static readonly SWAMP_LIZARD_HELM_KILL_NAMES = new Set([
-        'LizardHeavy'
+        'LizardHeavy',
+        'GreatLizardHeavy',
+        'GreatLizardHeavy2'
     ]);
     private static readonly SWAMP_LIZARD_HELM_HARD_KILL_NAMES = new Set([
-        'LizardHeavyHard'
+        'LizardHeavyHard',
+        'GreatLizardHeavyHard',
+        'GreatLizardHeavy2Hard'
     ]);
     private static readonly SWAMP_DEVOURER_TOOTH_KILL_NAMES = new Set([
         'DevourerShooting',
@@ -151,18 +159,22 @@ export class MissionHandler {
         'CastleLizard2',
         'CastleLizard3',
         'CastleLizardBanner1',
+        'CastleLizardBanner2',
         'CastleLizardCarnisaur1',
         'CastleLizardHeavy1',
-        'CastleLizardHeavy2'
+        'CastleLizardHeavy2',
+        'CastleLizardMaster'
     ]);
     private static readonly CASTLE_LIZARD_PROBLEM_HARD_KILL_NAMES = new Set([
         'CastleLizard1Hard',
         'CastleLizard2Hard',
         'CastleLizard3Hard',
         'CastleLizardBanner1Hard',
+        'CastleLizardBanner2Hard',
         'CastleLizardCarnisaur1Hard',
         'CastleLizardHeavy1Hard',
-        'CastleLizardHeavy2Hard'
+        'CastleLizardHeavy2Hard',
+        'CastleLizardMasterHard'
     ]);
     private static readonly CEMETERY_HEIRLOOM_KILL_NAMES = new Set([
         'DogPackmate',
@@ -1554,7 +1566,7 @@ export class MissionHandler {
 
         if (
             currentLevel === 'CraftTownTutorial' &&
-            DungeonCompletionConditions.isRequiredBoss(currentLevel, destroyedEntity)
+            DungeonCompletionConditions.isRequiredBoss(currentLevel, destroyedEntity, levelScope)
         ) {
             if (client.keepTutorialState) {
                 client.keepTutorialState.bossDefeated = true;
@@ -1576,7 +1588,7 @@ export class MissionHandler {
             return;
         }
 
-        if (DungeonCompletionConditions.isRequiredBoss(currentLevel, destroyedEntity)) {
+        if (DungeonCompletionConditions.isRequiredBoss(currentLevel, destroyedEntity, levelScope)) {
             const bossRoomId = MissionHandler.getEntityRoomId(destroyedEntity);
             if (bossRoomId > 0) {
                 noteDungeonRunBossCutscene(
@@ -1599,11 +1611,14 @@ export class MissionHandler {
         }
 
         const payload = MissionHandler.buildSyntheticLevelCompletePacket(100);
+        const completionState = DungeonCompletionSystem.getState(levelScope);
         for (const session of GlobalState.sessionsByToken.values()) {
+            const participantKey = DungeonCompletionSystem.getParticipantKey(session);
             if (
                 !session.playerSpawned ||
                 !session.character ||
                 getClientLevelScope(session) !== levelScope ||
+                (completionState && !completionState.enrolledParticipants.has(participantKey)) ||
                 MissionHandler.hasFinalizedDungeonCompletion(session, levelScope)
             ) {
                 continue;
@@ -1617,14 +1632,14 @@ export class MissionHandler {
 
     static tryRestoreDungeonCompletionAfterReentry(client: Client): void {
         const levelScope = getClientLevelScope(client);
-        if (!TutorialDungeonMechanics.isTutorialDungeon(levelScope)) {
-            return;
-        }
         const completionState = DungeonCompletionSystem.getState(levelScope);
         if (!completionState) {
             return;
         }
         const participantKey = DungeonCompletionSystem.getParticipantKey(client);
+        if (!completionState.enrolledParticipants.has(participantKey)) {
+            return;
+        }
         if (DungeonCompletionSystem.hasFinalized(levelScope, participantKey)) {
             TutorialDungeonMechanics.noteCompletionPhase(levelScope, 'completed', client.token);
             return;
@@ -1798,7 +1813,32 @@ export class MissionHandler {
         client.activeDungeonCutsceneRoomId = Math.max(0, Math.round(Number(roomId ?? 0)));
         client.lastDungeonCutsceneStartScope = scope;
         client.lastDungeonCutsceneStartAt = Date.now();
-        DungeonCompletionSystem.noteCutsceneStart(scope, roomId, client.lastDungeonCutsceneStartAt);
+        const bossId = MissionHandler.findDungeonBossCutsceneEntityId(
+            client,
+            scope,
+            getScopeLevelName(scope),
+            Math.max(0, Math.round(Number(roomId ?? 0)))
+        );
+        const bossEntity = bossId > 0
+            ? GlobalState.levelEntities.get(scope)?.get(bossId) ?? client.entities.get(bossId)
+            : null;
+        const completionEligibleAtStart = Boolean(
+            bossEntity &&
+            (
+                bossEntity.playerDamageContributed ||
+                bossEntity.clientDefeatVerified ||
+                bossEntity.dead ||
+                bossEntity.destroyed ||
+                Math.max(0, Math.round(Number(bossEntity.lastCombatActivityAt ?? 0))) > 0 ||
+                Number(bossEntity.hp ?? 1) <= 0
+            )
+        );
+        DungeonCompletionSystem.noteCutsceneStart(
+            scope,
+            roomId,
+            client.lastDungeonCutsceneStartAt,
+            completionEligibleAtStart
+        );
         TutorialDungeonMechanics.noteCutscenePhase(scope, roomId, 'active', client.token);
         MissionHandler.activateBossRunStatsForCutsceneRoom(client, scope, client.activeDungeonCutsceneRoomId);
     }
@@ -1896,11 +1936,11 @@ export class MissionHandler {
             }
 
             const entityId = Math.max(0, Math.round(Number(entity.id ?? entity.entId ?? entity.EntityID ?? 0)));
-            if (entityId <= 0 || !DungeonCompletionConditions.isRequiredBoss(levelName, entity)) {
+            if (entityId <= 0 || !DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope)) {
                 continue;
             }
 
-            if (MissionHandler.isRequiredDungeonCompletionBossEntity(levelName, entity)) {
+            if (MissionHandler.isRequiredDungeonCompletionBossEntity(levelName, entity, levelScope)) {
                 return entityId;
             }
 
@@ -1921,8 +1961,9 @@ export class MissionHandler {
             String(client.character.CurrentLevel?.name ?? '');
         return Boolean(
             currentLevel &&
-            DungeonCompletionConditions.allowsDefeatedBossProxyCopies(currentLevel) &&
-            DungeonCompletionConditions.isRequiredBoss(currentLevel, entity)
+            LevelConfig.isDungeonLevel(currentLevel) &&
+            DungeonCompletionConditions.requiresBosses(currentLevel) &&
+            DungeonCompletionConditions.isRequiredBoss(currentLevel, entity, getClientLevelScope(client))
         );
     }
 
@@ -2723,13 +2764,13 @@ export class MissionHandler {
         currentLevel: string
     ): boolean {
         const targetNames = MissionHandler.KILL_PROGRESS_TARGETS[missionId];
-        if (targetNames) {
-            return defeatedNames.some((name) => targetNames.has(name));
+        if (targetNames && defeatedNames.some((name) => targetNames.has(name))) {
+            return true;
         }
 
         const activeTargetNames = MissionHandler.getMissionActiveTargetNames(missionDef);
-        if (activeTargetNames.length) {
-            return activeTargetNames.some((name) => defeatedNames.includes(name));
+        if (activeTargetNames.length && activeTargetNames.some((name) => defeatedNames.includes(name))) {
+            return true;
         }
 
         if (MissionHandler.matchesCollectibleKillProgress(missionDef, defeatedNames)) {
@@ -2782,7 +2823,11 @@ export class MissionHandler {
             return false;
         }
 
-        return defeatedNames.some((name) => MissionHandler.matchesCollectibleRule(rule, name));
+        const hardMission = String(missionDef.MissionName ?? '').trim().endsWith('Hard') ||
+            String(missionDef.ZoneSet ?? '').trim().endsWith('Hard');
+        return defeatedNames.some((name) =>
+            name.endsWith('Hard') === hardMission && MissionHandler.matchesCollectibleRule(rule, name)
+        );
     }
 
     private static matchesCollectibleRule(rule: CollectibleKillProgressRule, rawName: string): boolean {
@@ -2824,10 +2869,13 @@ export class MissionHandler {
         const names = new Set<string>();
         for (const raw of [
             entity?.name,
+            entity?.EntName,
+            entity?.entName,
             entity?.characterName,
-            entity?.character_name
+            entity?.character_name,
+            entity?.displayName
         ]) {
-            const normalized = String(raw ?? '').trim();
+            const normalized = String(raw ?? '').replace(/^,+/, '').trim();
             if (normalized) {
                 names.add(normalized);
             }
@@ -2846,12 +2894,20 @@ export class MissionHandler {
         }
     }
 
-    private static isRequiredDungeonBossEntity(levelName: string | null | undefined, entity: any): boolean {
-        return DungeonCompletionConditions.isRequiredBoss(levelName, entity);
+    private static isRequiredDungeonBossEntity(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
+        return DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope);
     }
 
-    private static isRequiredDungeonCompletionBossEntity(levelName: string | null | undefined, entity: any): boolean {
-        return DungeonCompletionConditions.isRequiredBoss(levelName, entity);
+    private static isRequiredDungeonCompletionBossEntity(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
+        return DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope);
     }
 
     static shouldProcessEnemyKillStateDungeonCompletion(client: Client, entity: any): boolean {
@@ -2880,22 +2936,37 @@ export class MissionHandler {
             Boolean(entity?.clientSpawned) &&
             (
                 condition.mode === 'full-clear' ||
-                DungeonCompletionConditions.isRequiredBoss(currentLevel, entity) ||
+                DungeonCompletionConditions.isRequiredBoss(currentLevel, entity, levelScope) ||
                 Boolean(DungeonCompletionConditions.getObjectiveRole(currentLevel, entity))
             )
         );
     }
 
-    static isRequiredDungeonCompletionBossForLevel(levelName: string | null | undefined, entity: any): boolean {
-        return DungeonCompletionConditions.isRequiredBoss(levelName, entity);
+    static isRequiredDungeonCompletionBossForLevel(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
+        return DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope);
     }
 
-    static shouldIgnoreUnverifiedDungeonBossDefeat(levelName: string | null | undefined, entity: any): boolean {
-        if (!DungeonCompletionConditions.isRequiredBoss(levelName, entity)) {
+    static shouldIgnoreUnverifiedDungeonBossDefeat(
+        levelName: string | null | undefined,
+        entity: any,
+        levelScope: string = ''
+    ): boolean {
+        if (!DungeonCompletionConditions.isRequiredBoss(levelName, entity, levelScope)) {
             return false;
         }
 
         if (!DungeonCompletionConditions.requiresBosses(levelName)) {
+            return false;
+        }
+
+        // These levels deliberately leave their authored boss on the Flash client.
+        // A terminal state/destroy packet is the authority signal even when the
+        // server's cached HP snapshot did not receive the final delta first.
+        if (DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity, levelScope)) {
             return false;
         }
 
@@ -2912,7 +2983,7 @@ export class MissionHandler {
             // Some authored client-owned bosses stay at 1 HP on the server until
             // the Flash client emits its defeat signal. Higher HP is never a
             // verified boss death.
-            if (hp <= 1 && DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity)) {
+            if (hp <= 1 && DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity, levelScope)) {
                 return false;
             }
 
