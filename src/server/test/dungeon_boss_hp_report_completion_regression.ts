@@ -20,6 +20,9 @@ type FakeClient = {
     character: any;
     entities: Map<number, any>;
     entityIdAliases: Map<number, number>;
+    activeDungeonCutsceneScope: string;
+    activeDungeonCutsceneRoomId: number;
+    lastDungeonCutsceneStartAt: number;
 };
 
 function buildHpDeltaPayload(entityId: number, amount: number): Buffer {
@@ -51,7 +54,10 @@ function createClient(levelName: string, ordinal: number): FakeClient {
             missions: {}
         },
         entities: new Map<number, any>(),
-        entityIdAliases: new Map<number, number>()
+        entityIdAliases: new Map<number, number>(),
+        activeDungeonCutsceneScope: '',
+        activeDungeonCutsceneRoomId: 0,
+        lastDungeonCutsceneStartAt: 0
     };
 }
 
@@ -92,14 +98,24 @@ function clearRun(client: FakeClient): void {
     DungeonCompletionSystem.reset(scope);
     GlobalState.levelEntities.delete(scope);
     GlobalState.levelQuestProgress.delete(scope);
+    GlobalState.sessionsByToken.delete(client.token);
 }
 
-function testDeathToMeylourHpReportAndCutsceneGate(levelName: string, bossName: string, ordinal: number): void {
+function testAuthoredBossHpReportDuringDefeatCutscene(
+    levelName: string,
+    bossName: string,
+    ordinal: number
+): void {
     const client = createClient(levelName, ordinal);
     const boss = createBoss(10_000 + ordinal, bossName);
     const scope = seedBosses(client, [boss]);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+    client.activeDungeonCutsceneScope = scope;
+    client.activeDungeonCutsceneRoomId = boss.roomId;
+    client.lastDungeonCutsceneStartAt = Date.now();
+    DungeonCompletionSystem.noteCutsceneStart(scope, boss.roomId, 1000 + ordinal);
 
-    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -999));
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -400));
     assert.equal(boss.hp, 1000, `${levelName}: non-lethal client HP telemetry mutated canonical HP`);
     assert.equal(
         DungeonCompletionSystem.evaluate(scope).objectivesMet,
@@ -107,7 +123,15 @@ function testDeathToMeylourHpReportAndCutsceneGate(levelName: string, bossName: 
         `${levelName}: non-lethal client HP report completed the boss objective`
     );
 
-    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -1000));
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -400));
+    assert.equal(boss.hp, 1000, `${levelName}: second non-lethal client HP telemetry mutated canonical HP`);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).objectivesMet,
+        false,
+        `${levelName}: cumulative non-lethal client HP reports completed the boss objective early`
+    );
+
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -200));
     assert.equal(boss.hp, 0, `${levelName}: lethal required-boss HP report did not reach canonical state`);
     assert.equal(boss.dead, true, `${levelName}: lethal required-boss HP report did not mark the boss dead`);
     assert.equal(boss.clientDefeatVerified, true, `${levelName}: lethal boss report was not verified`);
@@ -119,10 +143,9 @@ function testDeathToMeylourHpReportAndCutsceneGate(levelName: string, bossName: 
     assert.equal(
         DungeonCompletionSystem.evaluate(scope).ready,
         false,
-        `${levelName}: completed before the authored Meylour defeat cutscene`
+        `${levelName}: completed before the authored boss defeat cutscene`
     );
 
-    DungeonCompletionSystem.noteCutsceneStart(scope, boss.roomId, 2000 + ordinal);
     assert.equal(
         DungeonCompletionSystem.evaluate(scope, 2100 + ordinal).ready,
         false,
@@ -155,6 +178,36 @@ function testMultiBossHpReportsRequireEveryBoss(): void {
         DungeonCompletionSystem.evaluate(scope).ready,
         true,
         'multi-boss dungeon did not complete after every required boss HP report'
+    );
+
+    clearRun(client);
+}
+
+function testBossHealResetsAccumulatedClientDamage(): void {
+    const client = createClient('OMM_Mission12', 30);
+    const boss = createBoss(10_230, 'MagmaCyclopsBoss');
+    const scope = seedBosses(client, [boss]);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+    client.activeDungeonCutsceneScope = scope;
+    client.activeDungeonCutsceneRoomId = boss.roomId;
+    client.lastDungeonCutsceneStartAt = Date.now();
+    DungeonCompletionSystem.noteCutsceneStart(scope, boss.roomId, 3000);
+
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -400));
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -400));
+    (CombatHandler as any).resetClientReportedBossDamage(scope, boss);
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -200));
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).objectivesMet,
+        false,
+        'boss regen did not clear stale accumulated client damage'
+    );
+
+    CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -800));
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).objectivesMet,
+        true,
+        'fresh post-regen client damage did not verify the boss defeat'
     );
 
     clearRun(client);
@@ -196,9 +249,23 @@ async function main(): Promise<void> {
     const originalMissionWork = combatHandler.fireAndForgetMissionWork;
     combatHandler.fireAndForgetMissionWork = (): void => undefined;
     try {
-        testDeathToMeylourHpReportAndCutsceneGate('OMM_Mission12', 'MagmaCyclopsBoss', 1);
-        testDeathToMeylourHpReportAndCutsceneGate('OMM_Mission12Hard', 'MagmaCyclopsBossHard', 2);
+        const authoredBossFlows = [
+            ['OMM_Mission2', 'CaveWizard'],
+            ['OMM_Mission2Hard', 'CaveWizardHard'],
+            ['OMM_Mission5', 'DragonWhite'],
+            ['OMM_Mission5Hard', 'DragonWhiteHard'],
+            ['SwampRoadConnectionMission', 'Aracnae'],
+            ['SwampRoadConnectionMissionHard', 'Aracnae'],
+            ['OMM_Mission12', 'MagmaCyclopsBoss'],
+            ['OMM_Mission12Hard', 'MagmaCyclopsBossHard'],
+            ['AC_Mission1', 'AncientDragonGold'],
+            ['AC_Mission1Hard', 'AncientDragonGoldHard']
+        ] as const;
+        authoredBossFlows.forEach(([levelName, bossName], index) =>
+            testAuthoredBossHpReportDuringDefeatCutscene(levelName, bossName, index + 1)
+        );
         testMultiBossHpReportsRequireEveryBoss();
+        testBossHealResetsAccumulatedClientDamage();
         await testContributedBossDestroyOverridesStaleCanonicalHp();
     } finally {
         combatHandler.fireAndForgetMissionWork = originalMissionWork;

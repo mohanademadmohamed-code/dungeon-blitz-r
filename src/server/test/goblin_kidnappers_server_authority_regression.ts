@@ -469,7 +469,7 @@ function testTagUgoUsesOneClientVisualBackedByCanonicalServerBoss(): void {
     assert.equal(packetCount(client, 0x0F), 0, 'proxy attachment must not send another visible boss spawn');
 }
 
-async function testBossDefeatWaitsForAnnaChain(): Promise<void> {
+async function testBossDefeatWaitsForDefeatCutscene(): Promise<void> {
     const client = createFakeClient('KidnapperRunner', 61001);
     resetFor(client);
     GlobalState.sessionsByToken.set(client.token, client as never);
@@ -479,11 +479,11 @@ async function testBossDefeatWaitsForAnnaChain(): Promise<void> {
     const state = TutorialDungeonMechanics.getClientState(client as never);
     assert.equal(state?.bossDefeated, true, 'Tag Ugo should be recorded as defeated');
     assert.equal(state?.annaFreed, false, 'Anna rescue should still be incomplete');
-    assert.equal(client.pendingDungeonCompletionScope, '', 'boss defeat alone must not schedule completion');
-    assert.equal(packetCount(client, 0x87), 0, 'boss defeat alone must not emit rank result');
+    assert.equal(client.pendingDungeonCompletionScope, '', 'boss defeat must wait in shared cutscene state');
+    assert.equal(packetCount(client, 0x87), 0, 'boss defeat must not emit rank result before the defeat cutscene');
 }
 
-async function testAnnaChainCompletesAfterBoss(): Promise<void> {
+async function testLateAnnaChainCannotDeadlockBossCompletion(): Promise<void> {
     const client = createFakeClient('AnnaRescuer', 61002);
     resetFor(client);
     GlobalState.sessionsByToken.set(client.token, client as never);
@@ -491,16 +491,8 @@ async function testAnnaChainCompletesAfterBoss(): Promise<void> {
     const scope = getClientLevelScope(client as never);
     await MissionHandler.handleForcedDungeonBossCompletion(client as never, bossEntity());
     MissionHandler.noteDungeonCutsceneStart(client as never, 11);
-    await MissionHandler.handleForcedDungeonObjectiveCompletion(client as never, annaChainEntity());
-
-    assert.equal(client.pendingDungeonCompletionScope, '', 'completion must wait in the shared state, not a client timer');
-    DungeonCompletionSystem.noteClientCompletionSignal(
-        scope,
-        DungeonCompletionSystem.getParticipantKey(client as never),
-        100
-    );
     const beforeCutsceneEnd = DungeonCompletionSystem.evaluate(scope);
-    assert.equal(beforeCutsceneEnd.ready, false, 'client completion signal must not bypass the active end cutscene');
+    assert.equal(beforeCutsceneEnd.ready, false, 'boss completion must not bypass the active end cutscene');
     assert.equal(beforeCutsceneEnd.reason, 'cutscene_gate_pending');
     assert.equal(packetCount(client, 0x87), 0, 'rank result must remain hidden until the end cutscene finishes');
 
@@ -508,11 +500,11 @@ async function testAnnaChainCompletesAfterBoss(): Promise<void> {
     await sleep(5);
 
     assert.equal(DungeonCompletionSystem.evaluate(scope).objectivesMet, true);
-    assert.equal(packetCount(client, 0x87), 1, 'final rescue should emit one rank result');
+    assert.equal(packetCount(client, 0x87), 1, 'boss defeat cutscene should emit one rank result');
 
     await MissionHandler.handleForcedDungeonObjectiveCompletion(client as never, annaChainEntity());
     await sleep(5);
-    assert.equal(packetCount(client, 0x87), 1, 'duplicate chain defeat should not emit duplicate rank result');
+    assert.equal(packetCount(client, 0x87), 1, 'late chain state must not deadlock or duplicate completion');
 }
 
 function testScriptedObjectiveStateIsIdempotent(): void {
@@ -785,8 +777,8 @@ async function main(): Promise<void> {
     testTagUgoUsesCanonicalServerStatsAndHpSync();
     testTagUgoUsesOneClientVisualBackedByCanonicalServerBoss();
     testPartyLeaderSideEnemiesRemainClientPrivate();
-    await testBossDefeatWaitsForAnnaChain();
-    await testAnnaChainCompletesAfterBoss();
+    await testBossDefeatWaitsForDefeatCutscene();
+    await testLateAnnaChainCannotDeadlockBossCompletion();
     testScriptedObjectiveStateIsIdempotent();
     testBossIntroAndThresholdsAreServerTracked();
     await testEarlyChainBroadcastAndLateJoinSnapshot();

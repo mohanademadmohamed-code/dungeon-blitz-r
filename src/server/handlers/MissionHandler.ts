@@ -2916,6 +2916,13 @@ export class MissionHandler {
             return false;
         }
 
+        // These levels deliberately leave their authored boss on the Flash client.
+        // A terminal state/destroy packet is the authority signal even when the
+        // server's cached HP snapshot did not receive the final delta first.
+        if (DungeonCompletionConditions.isClientAuthorityBoss(levelName, entity)) {
+            return false;
+        }
+
         if (Boolean(entity?.clientDefeatVerified)) {
             return false;
         }

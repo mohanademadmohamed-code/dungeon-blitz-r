@@ -56,6 +56,7 @@ import { getCharacterRuntimeLevel, getPartyRuntimeLevelForClient } from '../core
 import { getCraftTownHomeInstanceId } from '../utils/HomeVisitGuard';
 import { TutorialDungeonMechanics } from '../core/TutorialDungeonMechanics';
 import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
+import { DungeonCompletionConditions } from '../core/DungeonCompletionConditions';
 
 const db = new JsonAdapter();
 
@@ -5144,6 +5145,11 @@ export class LevelHandler {
             Number(canonicalEntity.team ?? 0) === EntityTeam.ENEMY;
         const canonicalHp = Math.round(Number(canonicalEntity?.hp ?? 1));
         const canonicalDestroyed = Boolean(canonicalEntity?.destroyed);
+        const acceptsClientAuthorityTerminal = Boolean(
+            isEnemyCanonical &&
+            isDefeatEntState &&
+            DungeonCompletionConditions.isClientAuthorityBoss(currentLevel, canonicalEntity)
+        );
         const canonicalTerminal = isEnemyCanonical && (
             canonicalDestroyed ||
             (Number.isFinite(canonicalHp) && canonicalHp <= 0)
@@ -5195,6 +5201,7 @@ export class LevelHandler {
         if (
             isEnemyCanonical &&
             isDefeatEntState &&
+            !acceptsClientAuthorityTerminal &&
             Number.isFinite(canonicalHp) &&
             canonicalHp > 0
         ) {

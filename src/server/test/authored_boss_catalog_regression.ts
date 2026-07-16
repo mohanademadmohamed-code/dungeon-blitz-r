@@ -59,7 +59,7 @@ function testEveryBossGroupHasAnAuthoredPacketIdentity(): void {
             );
         }
     }
-    assert.equal(bossLevelCount, 117, 'boss-mode catalog coverage changed without updating the authored audit');
+    assert.equal(bossLevelCount, 123, 'boss-mode catalog coverage changed without updating the authored audit');
 }
 
 function deadBoss(id: number, name: string): any {
@@ -134,7 +134,7 @@ function main(): void {
     NpcLoader.load(dataDir);
     testEveryBossGroupHasAnAuthoredPacketIdentity();
     testScriptedIdentityAndEarlyEndingGuardrails();
-    console.log('Authored boss catalog regression passed (117 boss-mode dungeons).');
+    console.log('Authored boss catalog regression passed (123 boss-mode dungeons).');
 }
 
 main();

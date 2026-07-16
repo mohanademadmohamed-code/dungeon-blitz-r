@@ -1644,6 +1644,7 @@ export class CombatHandler {
             return;
         }
 
+        CombatHandler.resetClientReportedBossDamage(levelScope, entity);
         CombatHandler.setEntityLastRegenTickAt(
             entity,
             regenState.baseTickAt + ((regenState.ticks - 1) * CombatHandler.DUNGEON_BOSS_REGEN_INTERVAL_MS)
@@ -1756,6 +1757,13 @@ export class CombatHandler {
                 continue;
             }
             apply(session.entities.get(entityId));
+        }
+    }
+
+    private static resetClientReportedBossDamage(levelScope: string, sourceEntity: any): void {
+        for (const copy of CombatHandler.collectHostileHealthCopies(levelScope, sourceEntity, true)) {
+            copy.clientReportedDamageLifeNonce = Math.max(0, Math.round(Number(copy.lifeNonce ?? 0)));
+            copy.clientReportedDamageByToken = new Map<number, number>();
         }
     }
 
@@ -5185,6 +5193,13 @@ export class CombatHandler {
             return;
         }
 
+        if (shouldProcessDefeatState && destroyedEntity) {
+            destroyedEntity.hp = 0;
+            destroyedEntity.dead = true;
+            destroyedEntity.destroyed = true;
+            destroyedEntity.entState = EntityState.DEAD;
+        }
+
         if (levelName === 'CraftTownTutorial' && client.keepTutorialState) {
             const entityName = String(destroyedEntity?.name ?? '');
             if (entityName === 'GoblinShamanHood' || entityName === 'IntroGoblinShamanHood') {
@@ -5525,10 +5540,32 @@ export class CombatHandler {
         healthState: { maxHp: number; currentHp: number; authoritativeKill: boolean },
         amount: number
     ): boolean {
-        if (
-            amount >= 0 ||
-            !MissionHandler.shouldCompleteDungeonFromBossHpReport(client, targetEntity)
-        ) {
+        if (!MissionHandler.shouldCompleteDungeonFromBossHpReport(client, targetEntity)) {
+            return false;
+        }
+
+        const lifeNonce = Math.max(0, Math.round(Number(targetEntity?.lifeNonce ?? 0)));
+        if (Math.round(Number(targetEntity?.clientReportedDamageLifeNonce ?? -1)) !== lifeNonce) {
+            targetEntity.clientReportedDamageLifeNonce = lifeNonce;
+            targetEntity.clientReportedDamageByToken = new Map<number, number>();
+        }
+        const reportedDamageByToken = targetEntity.clientReportedDamageByToken instanceof Map
+            ? targetEntity.clientReportedDamageByToken as Map<number, number>
+            : new Map<number, number>();
+        targetEntity.clientReportedDamageByToken = reportedDamageByToken;
+        for (const copy of CombatHandler.collectHostileHealthCopies(levelScope, targetEntity, true)) {
+            copy.clientReportedDamageLifeNonce = lifeNonce;
+            copy.clientReportedDamageByToken = reportedDamageByToken;
+        }
+        const sourceToken = Math.max(0, Math.round(Number(client.token ?? 0)));
+        const previousReportedDamage = Math.max(0, Math.round(Number(reportedDamageByToken.get(sourceToken) ?? 0)));
+        const nextReportedDamage = Math.max(
+            0,
+            Math.min(healthState.maxHp, previousReportedDamage - amount)
+        );
+        reportedDamageByToken.set(sourceToken, nextReportedDamage);
+
+        if (amount >= 0) {
             return false;
         }
 
@@ -5536,7 +5573,7 @@ export class CombatHandler {
             0,
             Math.min(healthState.maxHp, Math.round(healthState.currentHp + amount))
         );
-        if (reportedNextHp > 0) {
+        if (reportedNextHp > 0 && nextReportedDamage < healthState.maxHp) {
             return false;
         }
 
@@ -5592,7 +5629,15 @@ export class CombatHandler {
             if (amount < 0 && entity && !entity.isPlayer && Boolean(entity.untargetable)) {
                 return;
             }
-            if (amount < 0 && LevelHandler.isDungeonCutsceneCombatLocked(client)) {
+            if (
+                amount < 0 &&
+                LevelHandler.isDungeonCutsceneCombatLocked(client) &&
+                !DungeonCompletionConditions.isRequiredBoss(
+                    getScopeLevelName(levelScope),
+                    entity,
+                    levelScope
+                )
+            ) {
                 return;
             }
             if (CombatHandler.recordClientHostileHpDelta(client, levelScope, rawEntityId, entityId, entity, amount)) {

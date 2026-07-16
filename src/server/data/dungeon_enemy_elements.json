@@ -1125,6 +1125,10 @@
       {
         "enemyType": "SwampMonster",
         "count": 1
+      },
+      {
+        "enemyType": "SwampSpiderQueen",
+        "count": 1
       }
     ],
     "source": "level-swf",
@@ -1137,7 +1141,8 @@
       "a_Room_SRConnM25",
       "a_Room_SRConnM30",
       "a_Room_SRConnM34",
-      "a_Room_SRConnM38"
+      "a_Room_SRConnM38",
+      "a_Room_SRCM01_ArachnaeBoss"
     ]
   },
   "SwampRoadConnectionMissionHard": {
@@ -1152,6 +1157,10 @@
       {
         "enemyType": "SwampMonsterHard",
         "count": 1
+      },
+      {
+        "enemyType": "SwampSpiderQueenHard",
+        "count": 1
       }
     ],
     "source": "level-swf",
@@ -1164,7 +1173,8 @@
       "a_Room_SRConnM25",
       "a_Room_SRConnM30",
       "a_Room_SRConnM34",
-      "a_Room_SRConnM38"
+      "a_Room_SRConnM38",
+      "a_Room_SRCM01_ArachnaeBoss"
     ]
   },
   "BT_Mission1": {
