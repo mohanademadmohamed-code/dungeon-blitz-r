@@ -709,12 +709,19 @@ export class CombatHandler {
     }
 
     private static isPlayerSessionDead(client: Client): boolean {
+        const localEntity = client.entities.get(client.clientEntID);
+        const levelEntity = CombatHandler.resolveLevelEntity(getClientLevelScope(client), client.clientEntID);
+        if (
+            CombatHandler.isEntityActiveWithPositiveHp(localEntity) ||
+            CombatHandler.isEntityActiveWithPositiveHp(levelEntity)
+        ) {
+            return false;
+        }
+
         if (Math.round(Number(client.authoritativeCurrentHp ?? 1)) <= 0) {
             return true;
         }
 
-        const localEntity = client.entities.get(client.clientEntID);
-        const levelEntity = CombatHandler.resolveLevelEntity(getClientLevelScope(client), client.clientEntID);
         return CombatHandler.isEntityDead(localEntity) ||
             CombatHandler.isEntityDead(levelEntity);
     }
@@ -809,17 +816,24 @@ export class CombatHandler {
             return false;
         }
 
-        const authoritativeHp = Number(client.authoritativeCurrentHp ?? NaN);
-        if (Number.isFinite(authoritativeHp) && Math.round(authoritativeHp) <= 0) {
-            return true;
-        }
-
         const localEntity = typeof client.entities?.get === 'function'
             ? client.entities.get(entityId)
             : null;
         const levelEntity = levelScope
             ? CombatHandler.resolveLevelEntity(levelScope, entityId)
             : null;
+        if (
+            CombatHandler.isEntityActiveWithPositiveHp(localEntity) ||
+            CombatHandler.isEntityActiveWithPositiveHp(levelEntity)
+        ) {
+            return false;
+        }
+
+        const authoritativeHp = Number(client.authoritativeCurrentHp ?? NaN);
+        if (Number.isFinite(authoritativeHp) && Math.round(authoritativeHp) <= 0) {
+            return true;
+        }
+
         return CombatHandler.isEntityDead(localEntity) || CombatHandler.isEntityDead(levelEntity);
     }
 

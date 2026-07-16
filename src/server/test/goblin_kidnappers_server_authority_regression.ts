@@ -28,6 +28,9 @@ type FakeClient = {
     userId: null;
     playerSpawned: boolean;
     clientEntID: number;
+    authoritativeCurrentHp: number;
+    authoritativeMaxHp: number;
+    enemyDeathRegenArmed: boolean;
     character: any;
     characters: any[];
     sentPackets: SentPacket[];
@@ -99,6 +102,9 @@ function createFakeClient(name: string, token: number): FakeClient {
         userId: null,
         playerSpawned: true,
         clientEntID: token + 1000,
+        authoritativeCurrentHp: 1000,
+        authoritativeMaxHp: 1000,
+        enemyDeathRegenArmed: false,
         character,
         characters: [character],
         sentPackets,
@@ -469,6 +475,99 @@ function testTagUgoUsesOneClientVisualBackedByCanonicalServerBoss(): void {
     assert.equal(packetCount(client, 0x0F), 0, 'proxy attachment must not send another visible boss spawn');
 }
 
+function testTagUgoDoesNotRegenWhenPlayerRevivedWithStaleZeroHp(): void {
+    const client = createFakeClient('RevivedBossFighter', 61010);
+    client.currentRoomId = 11;
+    resetFor(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+
+    EntityHandler.sendInitialLevelEntities(client as never, 'TutorialDungeon');
+    const scope = getClientLevelScope(client as never);
+    const canonicalBoss = GlobalState.levelEntities.get(scope)?.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    assert.ok(canonicalBoss, 'Tag Ugo canonical server boss should be seeded for regen regression');
+
+    canonicalBoss.hp = 500;
+    canonicalBoss.maxHp = 1000;
+    canonicalBoss.dead = false;
+    canonicalBoss.entState = EntityState.ACTIVE;
+    canonicalBoss.deathRegenArmedForPlayerKey = `${client.token}:${client.clientEntID}`;
+    canonicalBoss.lastCombatActivityAt = 1;
+    canonicalBoss.lastCombatRegenTickAt = 0;
+    canonicalBoss.aggroTargetEntityId = client.clientEntID;
+    canonicalBoss.aggroTargetToken = client.token;
+    canonicalBoss.x = 22695;
+    canonicalBoss.y = 2959;
+
+    client.authoritativeCurrentHp = 0;
+    client.enemyDeathRegenArmed = true;
+    const activePlayerEntity = {
+        id: client.clientEntID,
+        isPlayer: true,
+        roomId: 11,
+        x: 22600,
+        y: 2950,
+        hp: 1000,
+        maxHp: 1000,
+        dead: false,
+        entState: EntityState.ACTIVE
+    };
+    client.entities.set(client.clientEntID, activePlayerEntity);
+    GlobalState.levelEntities.get(scope)?.set(client.clientEntID, { ...activePlayerEntity });
+
+    (CombatHandler as any).processHostileOutOfCombatRegen(scope, canonicalBoss, 60_000);
+    assert.equal(canonicalBoss.hp, 500, 'Tag Ugo regenerated while the player was alive with stale zero authoritative HP');
+    assert.equal(
+        String(canonicalBoss.deathRegenArmedForPlayerKey ?? ''),
+        '',
+        'stale player-death regen arm should be cleared once the player is active again'
+    );
+    assert.equal(canonicalBoss.aggroTargetEntityId, client.clientEntID, 'active boss aggro target should not be cleared as dead');
+    assert.equal(canonicalBoss.aggroTargetToken, client.token, 'active boss aggro token should not be cleared as dead');
+}
+
+function testTagUgoStillRegensAfterActualPlayerDeath(): void {
+    const client = createFakeClient('DeadBossFighter', 61011);
+    client.currentRoomId = 11;
+    resetFor(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+
+    EntityHandler.sendInitialLevelEntities(client as never, 'TutorialDungeon');
+    const scope = getClientLevelScope(client as never);
+    const canonicalBoss = GlobalState.levelEntities.get(scope)?.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    assert.ok(canonicalBoss, 'Tag Ugo canonical server boss should be seeded for death regen regression');
+
+    canonicalBoss.hp = 500;
+    canonicalBoss.maxHp = 1000;
+    canonicalBoss.dead = false;
+    canonicalBoss.entState = EntityState.ACTIVE;
+    canonicalBoss.deathRegenArmedForPlayerKey = `${client.token}:${client.clientEntID}`;
+    canonicalBoss.lastCombatActivityAt = 1;
+    canonicalBoss.lastCombatRegenTickAt = 0;
+    canonicalBoss.aggroTargetEntityId = client.clientEntID;
+    canonicalBoss.aggroTargetToken = client.token;
+    canonicalBoss.x = 22695;
+    canonicalBoss.y = 2959;
+
+    client.authoritativeCurrentHp = 0;
+    client.enemyDeathRegenArmed = true;
+    const deadPlayerEntity = {
+        id: client.clientEntID,
+        isPlayer: true,
+        roomId: 11,
+        x: 22600,
+        y: 2950,
+        hp: 0,
+        maxHp: 1000,
+        dead: true,
+        entState: EntityState.DEAD
+    };
+    client.entities.set(client.clientEntID, deadPlayerEntity);
+    GlobalState.levelEntities.get(scope)?.set(client.clientEntID, { ...deadPlayerEntity });
+
+    (CombatHandler as any).processHostileOutOfCombatRegen(scope, canonicalBoss, 60_000);
+    assert.equal(canonicalBoss.hp > 500, true, 'Tag Ugo should still regen after an actual player death');
+}
+
 async function testBossDefeatWaitsForDefeatCutscene(): Promise<void> {
     const client = createFakeClient('KidnapperRunner', 61001);
     resetFor(client);
@@ -787,6 +886,8 @@ async function main(): Promise<void> {
     testOnlyTagUgoIsServerSpawned();
     testTagUgoUsesCanonicalServerStatsAndHpSync();
     testTagUgoUsesOneClientVisualBackedByCanonicalServerBoss();
+    testTagUgoDoesNotRegenWhenPlayerRevivedWithStaleZeroHp();
+    testTagUgoStillRegensAfterActualPlayerDeath();
     testPartyLeaderSideEnemiesRemainClientPrivate();
     await testBossDefeatWaitsForDefeatCutscene();
     await testLateAnnaChainCannotDeadlockBossCompletion();
