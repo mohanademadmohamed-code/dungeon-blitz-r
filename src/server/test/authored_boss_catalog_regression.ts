@@ -59,7 +59,7 @@ function testEveryBossGroupHasAnAuthoredPacketIdentity(): void {
             );
         }
     }
-    assert.equal(bossLevelCount, 123, 'boss-mode catalog coverage changed without updating the authored audit');
+    assert.equal(bossLevelCount, 125, 'boss-mode catalog coverage changed without updating the authored audit');
 }
 
 function deadBoss(id: number, name: string): any {
@@ -105,6 +105,64 @@ function assertMarkerRequired(levelName: string, decoyName: string, realBossName
     GlobalState.levelEntities.delete(scope);
 }
 
+function assertMarkedAliasCompletes(levelName: string, aliasName: string, canonicalName: string, ordinal: number): void {
+    const scope = getLevelScopeKey(levelName, `authored-alias-${ordinal}`);
+    const aliasBoss = deadBoss(20_000 + ordinal * 10, aliasName);
+    GlobalState.levelEntities.set(scope, new Map([[aliasBoss.id, aliasBoss]]));
+    markRoomBossEntity(scope, aliasBoss.id, aliasBoss.roomId, aliasName);
+    DungeonCompletionSystem.noteEntityDefeated(scope, aliasBoss, 1000);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope, 1001).objectivesMet,
+        true,
+        `${levelName}: marked authored alias ${aliasName} did not satisfy ${canonicalName}`
+    );
+
+    DungeonCompletionSystem.reset(scope);
+    GlobalState.levelEntities.delete(scope);
+}
+
+function assertVerifiedClientBossBypassesMissingMarker(levelName: string, bossName: string, ordinal: number): void {
+    const scope = getLevelScopeKey(levelName, `verified-client-boss-${ordinal}`);
+    const unverified = deadBoss(30_000 + ordinal * 10, bossName);
+    unverified.clientSpawned = true;
+    unverified.playerDamageContributed = false;
+    unverified.clientDefeatVerified = false;
+    GlobalState.levelEntities.set(scope, new Map([[unverified.id, unverified]]));
+    DungeonCompletionSystem.noteEntityDefeated(scope, unverified, 1000);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope, 1001).objectivesMet,
+        false,
+        `${levelName}: unverified unmarked client boss bypassed the marker guard`
+    );
+
+    const verified = deadBoss(unverified.id + 1, bossName);
+    verified.clientSpawned = true;
+    verified.playerDamageContributed = true;
+    GlobalState.levelEntities.get(scope)!.set(verified.id, verified);
+    DungeonCompletionSystem.noteEntityDefeated(scope, verified, 1002);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope, 1003).objectivesMet,
+        true,
+        `${levelName}: verified unmarked client boss did not bypass the missing marker`
+    );
+
+    DungeonCompletionSystem.reset(scope);
+    GlobalState.levelEntities.delete(scope);
+}
+
+function assertPacketOnlyBossCompletes(levelName: string, bossName: string, ordinal: number): void {
+    const scope = getLevelScopeKey(levelName, `packet-only-boss-${ordinal}`);
+    const boss = deadBoss(40_000 + ordinal * 10, bossName);
+    DungeonCompletionSystem.noteEntityDefeated(scope, boss, 1000);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope, 1001).ready,
+        true,
+        `${levelName}: packet-only boss defeat did not complete without a scoped entity map`
+    );
+
+    DungeonCompletionSystem.reset(scope);
+}
+
 function testScriptedIdentityAndEarlyEndingGuardrails(): void {
     assert.equal(
         DungeonCompletionConditions.getCanonicalBossName('GhostBossDungeon', {
@@ -126,6 +184,12 @@ function testScriptedIdentityAndEarlyEndingGuardrails(): void {
     assertMarkerRequired('JC_Mission11Hard', 'BrigandChampHard', 'BrigandChampHard', 2);
     assertMarkerRequired('SD_Mission4', 'OasisVizierGreen', 'OasisVizier', 3);
     assertMarkerRequired('SD_Mission4Hard', 'OasisVizierGreenHard', 'OasisVizierHard', 4);
+    assertMarkedAliasCompletes('JC_Mission11', 'BrigandChampMarker', 'BrigandChamp', 5);
+    assertMarkedAliasCompletes('JC_Mission11Hard', 'BrigandChampMarkerHard', 'BrigandChampHard', 6);
+    assertVerifiedClientBossBypassesMissingMarker('SD_Mission4', 'OasisVizier', 7);
+    assertVerifiedClientBossBypassesMissingMarker('SD_Mission4Hard', 'OasisVizierHard', 8);
+    assertPacketOnlyBossCompletes('SD_Mission1', 'RaptorHorned', 9);
+    assertPacketOnlyBossCompletes('SD_Mission1Hard', 'RaptorHornedHard', 10);
 }
 
 function main(): void {
@@ -134,7 +198,7 @@ function main(): void {
     NpcLoader.load(dataDir);
     testEveryBossGroupHasAnAuthoredPacketIdentity();
     testScriptedIdentityAndEarlyEndingGuardrails();
-    console.log('Authored boss catalog regression passed (123 boss-mode dungeons).');
+    console.log('Authored boss catalog regression passed (125 boss-mode dungeons).');
 }
 
 main();

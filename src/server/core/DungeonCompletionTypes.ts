@@ -23,6 +23,7 @@ export type DungeonCompletionCondition = {
     requirePlayerDamageForClientBosses?: boolean;
     clientAuthorityBosses?: string[];
     requireRoomBossMarker?: boolean;
+    allowVerifiedClientBossWithoutRoomBossMarker?: boolean;
 };
 
 export type DungeonCompletionPhase =

@@ -137,13 +137,6 @@ export class DungeonCompletionConditions {
         if (!condition || condition.mode !== 'bosses') {
             return '';
         }
-        if (
-            condition.requireRoomBossMarker &&
-            !hasExplicitRoomBossMarker(entity) &&
-            !(levelScope && isRoomBossEntity(levelScope, entity))
-        ) {
-            return '';
-        }
 
         const requiredByKey = new Map<string, string>();
         for (const group of condition.bossGroups ?? []) {
@@ -158,6 +151,23 @@ export class DungeonCompletionConditions {
         for (const entityName of getEntityNames(entity)) {
             const canonical = requiredByKey.get(normalizeIdentity(entityName));
             if (canonical) {
+                if (
+                    condition.requireRoomBossMarker &&
+                    !hasExplicitRoomBossMarker(entity) &&
+                    !(levelScope && isRoomBossEntity(levelScope, entity))
+                ) {
+                    const verifiedClientBossWithoutMarker = Boolean(
+                        condition.allowVerifiedClientBossWithoutRoomBossMarker &&
+                        entity?.clientSpawned &&
+                        entity?.playerDamageContributed &&
+                        (condition.clientAuthorityBosses ?? [])
+                            .map(normalizeIdentity)
+                            .includes(normalizeIdentity(canonical))
+                    );
+                    if (!verifiedClientBossWithoutMarker) {
+                        return '';
+                    }
+                }
                 return canonical;
             }
         }
