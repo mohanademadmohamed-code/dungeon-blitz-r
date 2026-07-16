@@ -3628,6 +3628,10 @@ export class EntityHandler {
         client.entities.set(entityId, props);
         if (ownsThisPlayerPacket) {
             MovementAuthority.reset(client, 'entity_full_update_self', props.x, props.y);
+            if (Number(props.entState ?? EntityState.ACTIVE) !== EntityState.DEAD && !Boolean((props as any).dead)) {
+                const { CombatHandler } = require('./CombatHandler') as typeof import('./CombatHandler');
+                CombatHandler.notePlayerActiveMovementState(client, Date.now(), true);
+            }
         }
         if (
             !isPlayer &&

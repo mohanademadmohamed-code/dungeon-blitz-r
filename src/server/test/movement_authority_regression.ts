@@ -120,6 +120,21 @@ async function main(): Promise<void> {
         assert.equal(highRateReplay.accepted, false, 'high-rate replayed movement packet gained extra distance');
         assert.equal(highRateReplay.reason, 'speed_delta');
 
+        MovementAuthority.reset(client, 'spawn', 0, 0, now - 635);
+        ownEntity.x = 0;
+        ownEntity.y = 0;
+        client.movementAuthority.movementBudgetDistance = 674;
+        client.movementAuthority.movementBudgetUpdatedAtMs = now - 635;
+        client.sentPackets.length = 0;
+        LevelHandler.handleEntityIncrementalUpdate(client, buildMovementPayload(client.clientEntID, 1502, 0));
+        assert.equal(ownEntity.x, 1020, 'speed_delta correction froze the authoritative player instead of advancing to the server budget cap');
+        assert.equal(ownEntity.y, 0, 'capped speed_delta correction changed the wrong axis');
+        assert.equal(
+            client.sentPackets.some((packet: { id: number }) => packet.id === 0x07),
+            true,
+            'capped speed_delta correction did not tell the client to converge'
+        );
+
         MovementAuthority.reset(client, 'spawn', 0, 0, now);
         ownEntity.x = 0;
         ownEntity.y = 0;

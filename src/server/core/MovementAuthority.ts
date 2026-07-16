@@ -46,6 +46,12 @@ export interface MovementValidationResult {
     disconnect: boolean;
 }
 
+export interface MovementClampResult {
+    clamped: boolean;
+    x: number;
+    y: number;
+}
+
 export class MovementAuthority {
     private static readonly BASE_PLAYER_SPEED_PER_SECOND = 900;
     private static readonly MOUNT_SPEED_MULTIPLIER = 1.45;
@@ -228,6 +234,46 @@ export class MovementAuthority {
         state.movementBudgetDistance = Math.max(0, state.movementBudgetDistance - actualDistance);
         MovementAuthority.accept(state, attemptedX, attemptedY, normalizedNowMs, 'accepted');
         return MovementAuthority.result(true, 'accepted', attemptedX, attemptedY, state, elapsedMs, normalAllowed, actualDistance);
+    }
+
+    static commitCappedRejectedMovement(
+        client: Pick<MovementAuthorityClient, 'movementAuthority'>,
+        result: MovementValidationResult,
+        nowMs: number = MovementAuthority.nowMs()
+    ): MovementClampResult {
+        const state = client.movementAuthority ?? MovementAuthority.createState('speed_delta_clamp');
+        client.movementAuthority = state;
+        if (
+            result.accepted ||
+            result.reason !== 'speed_delta' ||
+            result.quarantine ||
+            result.disconnect ||
+            !Number.isFinite(result.actualDistance) ||
+            !Number.isFinite(result.allowedDistance) ||
+            result.actualDistance <= 0 ||
+            result.allowedDistance <= 0
+        ) {
+            return { clamped: false, x: state.lastAcceptedX, y: state.lastAcceptedY };
+        }
+
+        const ratio = Math.max(0, Math.min(1, result.allowedDistance / result.actualDistance));
+        if (ratio <= 0 || ratio >= 1) {
+            return { clamped: false, x: state.lastAcceptedX, y: state.lastAcceptedY };
+        }
+
+        const clampedX = MovementAuthority.coordinate(
+            result.lastAcceptedX + ((result.attemptedX - result.lastAcceptedX) * ratio)
+        );
+        const clampedY = MovementAuthority.coordinate(
+            result.lastAcceptedY + ((result.attemptedY - result.lastAcceptedY) * ratio)
+        );
+        state.lastAcceptedX = clampedX;
+        state.lastAcceptedY = clampedY;
+        state.lastAcceptedAtMs = Math.max(0, Math.round(nowMs));
+        state.movementBudgetUpdatedAtMs = state.lastAcceptedAtMs;
+        state.movementBudgetDistance = 0;
+        state.lastMovementResetReason = 'speed_delta_clamped';
+        return { clamped: true, x: clampedX, y: clampedY };
     }
 
     private static getSpeedPerSecond(client: MovementAuthorityClient, nowMs: number = MovementAuthority.nowMs()): number {

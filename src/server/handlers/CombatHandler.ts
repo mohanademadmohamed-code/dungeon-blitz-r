@@ -2345,7 +2345,11 @@ export class CombatHandler {
         CombatHandler.armBossRegenForPlayerDeath(client, nowMs, !wasAlreadyDead || !deathRegenWasArmed);
     }
 
-    static notePlayerActiveMovementState(client: Client, nowMs: number = Date.now()): void {
+    static notePlayerActiveMovementState(
+        client: Client,
+        nowMs: number = Date.now(),
+        allowStaleDeadEntityRepair: boolean = false
+    ): void {
         if (!client.character || client.clientEntID <= 0) {
             return;
         }
@@ -2354,8 +2358,11 @@ export class CombatHandler {
         const localEntity = client.entities.get(client.clientEntID);
         const levelEntity = CombatHandler.resolveLevelEntity(levelScope, client.clientEntID);
         if (
-            CombatHandler.isEntityDead(localEntity) ||
-            CombatHandler.isEntityDead(levelEntity)
+            !allowStaleDeadEntityRepair &&
+            (
+                CombatHandler.isEntityDead(localEntity) ||
+                CombatHandler.isEntityDead(levelEntity)
+            )
         ) {
             return;
         }
@@ -3185,7 +3192,9 @@ export class CombatHandler {
         const canonicalHp = Math.max(0, Math.round(Number(entity?.hp ?? 0)));
         const maxHp = Math.max(0, Math.round(Number(entity?.maxHp ?? 0)));
         const previous = Number.isFinite(previousHp) ? Math.max(0, Math.round(previousHp)) : maxHp;
-        const expectedPostPacketHp = Math.max(0, previous - Math.max(0, Math.round(expectedDamage)));
+        const expectedPostPacketHp = TutorialDungeonMechanics.isCompletionBoss(levelScope, entity)
+            ? previous
+            : Math.max(0, previous - Math.max(0, Math.round(expectedDamage)));
         const delta = canonicalHp - expectedPostPacketHp;
         if (delta === 0) {
             return;
@@ -3217,7 +3226,12 @@ export class CombatHandler {
         const previousHp = Number.isFinite(previousHpRaw)
             ? Math.max(0, Math.round(previousHpRaw))
             : maxHp;
-        if (TutorialDungeonMechanics.isCompletionBoss(levelScope, entity)) {
+        const hasVisibleLocalEntity = Boolean(
+            existing &&
+            typeof existing === 'object' &&
+            (viewer.entities.has(localId) || viewer.entities.has(canonicalId))
+        );
+        if (TutorialDungeonMechanics.isCompletionBoss(levelScope, entity) && !hasVisibleLocalEntity) {
             viewer.send(0x78, CombatHandler.buildHpDeltaPayload(localId, maxHp));
             const damageTaken = Math.max(0, maxHp - canonicalHp);
             if (damageTaken > 0) {
@@ -3262,11 +3276,17 @@ export class CombatHandler {
             }
 
             const resolved = EntityHandler.resolveHostileLocalIdForViewer(viewer, levelScope, canonicalId, 'hp-broadcast-all');
-            if (!resolved.ok || resolved.localId <= 0) {
+            const localId = resolved.ok && resolved.localId > 0
+                ? resolved.localId
+                : TutorialDungeonMechanics.isCompletionBoss(levelScope, entity)
+                    ? EntityHandler.getRegisteredHostileLocalIdForViewer(viewer, entity) ||
+                        EntityHandler.resolveEntityLocalId(viewer, canonicalId)
+                    : 0;
+            if (localId <= 0) {
                 continue;
             }
 
-            if (CombatHandler.sendAuthoritativeServerAuthorityHpToViewer(viewer, levelScope, entity, resolved.localId, reason, hpVersion)) {
+            if (CombatHandler.sendAuthoritativeServerAuthorityHpToViewer(viewer, levelScope, entity, localId, reason, hpVersion)) {
                 count++;
             }
         }
@@ -3506,13 +3526,16 @@ export class CombatHandler {
 
             const isSourceViewer = viewer === anchor;
             if (isSourceViewer) {
+                const expectedDamageForCorrection = TutorialDungeonMechanics.isCompletionBoss(levelScope, entity)
+                    ? 0
+                    : appliedDamage;
                 CombatHandler.sendServerAuthorityHpCorrection(
                     viewer,
                     levelScope,
                     entity,
                     cacheState.localId,
                     previousHpForCorrection,
-                    appliedDamage,
+                    expectedDamageForCorrection,
                     'post_hit_converge'
                 );
             } else {

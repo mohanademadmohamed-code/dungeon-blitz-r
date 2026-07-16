@@ -5150,17 +5150,51 @@ export class LevelHandler {
             return;
         }
         if (isSelf && !isDefeatEntState) {
+            const nowMs = MovementAuthority.nowMs();
             const movementResult = MovementAuthority.validateIncrementalMovement(
                 client,
                 ent,
                 deltaX,
                 deltaY,
-                MovementAuthority.nowMs(),
+                nowMs,
                 [deltaVX, velocityY]
             );
             if (!movementResult.accepted) {
-                const correctionDeltaX = Math.round(movementResult.lastAcceptedX - movementResult.attemptedX);
-                const correctionDeltaY = Math.round(movementResult.lastAcceptedY - movementResult.attemptedY);
+                const cappedMovement = MovementAuthority.commitCappedRejectedMovement(client, movementResult, nowMs);
+                if (cappedMovement.clamped) {
+                    ent.x = cappedMovement.x;
+                    ent.y = cappedMovement.y;
+                    ent.v = Number(ent.v ?? 0);
+                    ent.entState = entState;
+                    ent.dead = false;
+                    ent.facingLeft = flags.bLeft;
+                    ent.bRunning = flags.bRunning;
+                    ent.bJumping = flags.bJumping;
+                    ent.bDropping = flags.bDropping;
+                    ent.bBackpedal = flags.bBackpedal;
+                    ent.velocityY = velocityY;
+                    ent.airborne = isAirborne;
+                    if (levelEntity && levelEntity !== ent) {
+                        levelEntity.x = cappedMovement.x;
+                        levelEntity.y = cappedMovement.y;
+                        levelEntity.v = Number(levelEntity.v ?? 0);
+                        levelEntity.entState = entState;
+                        levelEntity.dead = false;
+                        levelEntity.facingLeft = flags.bLeft;
+                        levelEntity.bRunning = flags.bRunning;
+                        levelEntity.bJumping = flags.bJumping;
+                        levelEntity.bDropping = flags.bDropping;
+                        levelEntity.bBackpedal = flags.bBackpedal;
+                        levelEntity.velocityY = velocityY;
+                        levelEntity.airborne = isAirborne;
+                    }
+                    const { CombatHandler } = require('./CombatHandler') as typeof import('./CombatHandler');
+                    CombatHandler.notePlayerActiveMovementState(client);
+                }
+                const correctionX = cappedMovement.clamped ? cappedMovement.x : movementResult.lastAcceptedX;
+                const correctionY = cappedMovement.clamped ? cappedMovement.y : movementResult.lastAcceptedY;
+                const correctionDeltaX = Math.round(correctionX - movementResult.attemptedX);
+                const correctionDeltaY = Math.round(correctionY - movementResult.attemptedY);
                 if (correctionDeltaX !== 0 || correctionDeltaY !== 0) {
                     MovementAuthority.armCorrectionGrace(client);
                     client.send(

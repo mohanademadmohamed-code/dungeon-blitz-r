@@ -5,6 +5,7 @@ import { GameData } from '../core/GameData';
 import { GlobalState } from '../core/GlobalState';
 import { LevelConfig } from '../core/LevelConfig';
 import { getClientLevelScope } from '../core/LevelScope';
+import { MovementAuthority } from '../core/MovementAuthority';
 import { TutorialDungeonMechanics } from '../core/TutorialDungeonMechanics';
 import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
 import { MissionLoader } from '../data/MissionLoader';
@@ -234,6 +235,32 @@ function buildHostileFullUpdate(entityId: number, name: string, roomId: number):
     return Buffer.concat([payload, Buffer.from([0])]);
 }
 
+function buildPlayerFullUpdate(client: FakeClient, x: number, y: number): Buffer {
+    const payload = (EntityHandler as any).buildEntityFullUpdatePayload({
+        id: client.clientEntID,
+        name: client.character.name,
+        isPlayer: true,
+        x,
+        y,
+        v: 0,
+        team: EntityTeam.PLAYER,
+        renderDepthOffset: 0,
+        characterName: client.character.name,
+        dramaAnim: '',
+        sleepAnim: '',
+        summonerId: 0,
+        powerId: 0,
+        entState: EntityState.ACTIVE,
+        facingLeft: false,
+        running: false,
+        jumping: false,
+        dropping: false,
+        backpedal: false,
+        roomId: client.currentRoomId
+    });
+    return Buffer.concat([payload, Buffer.from([0])]);
+}
+
 function buildDestroyEntityPayload(entityId: number): Buffer {
     const bb = new BitBuffer(false);
     bb.writeMethod4(entityId);
@@ -327,6 +354,14 @@ function levelStateSnapshots(client: FakeClient): string[] {
         });
 }
 
+function parseHpDelta(payload: Buffer): { entityId: number; delta: number } {
+    const br = new BitReader(payload);
+    return {
+        entityId: br.readMethod4(),
+        delta: br.readMethod45()
+    };
+}
+
 function shareScope(...clients: FakeClient[]): void {
     const instanceId = clients[0].levelInstanceId;
     for (const client of clients) {
@@ -337,6 +372,20 @@ function shareScope(...clients: FakeClient[]): void {
 
 function packetCount(client: FakeClient, packetId: number): number {
     return client.sentPackets.filter((packet) => packet.id === packetId).length;
+}
+
+function hpDeltasFor(client: FakeClient, entityId: number): number[] {
+    return client.sentPackets
+        .filter((packet) => packet.id === 0x78)
+        .map((packet) => {
+            const br = new BitReader(packet.payload);
+            return {
+                entityId: br.readMethod4(),
+                delta: br.readMethod45()
+            };
+        })
+        .filter((packet) => packet.entityId === entityId)
+        .map((packet) => packet.delta);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -491,6 +540,49 @@ function testTagUgoUsesOneClientVisualBackedByCanonicalServerBoss(): void {
     assert.equal(packetCount(client, 0x0F), 0, 'proxy attachment must not send another visible boss spawn');
 }
 
+async function testTagUgoDamageSyncDoesNotRefillVisibleBossBar(): Promise<void> {
+    const client = createFakeClient('TagUgoHpViewer', 61013);
+    client.currentRoomId = 11;
+    resetFor(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+
+    EntityHandler.sendInitialLevelEntities(client as never, 'TutorialDungeon');
+    EntityHandler.handleEntityFullUpdate(
+        client as never,
+        buildHostileFullUpdate(TutorialDungeonMechanics.TAG_UGO_BOSS_ID, 'GoblinBoss1', 11)
+    );
+
+    const scope = getClientLevelScope(client as never);
+    const canonicalBoss = GlobalState.levelEntities.get(scope)?.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    assert.ok(canonicalBoss, 'Tag Ugo canonical server boss should exist for HP relay regression');
+    const maxHp = Math.max(1, Math.round(Number(canonicalBoss.maxHp)));
+    client.sentPackets.length = 0;
+
+    await CombatHandler.handlePowerCast(client as never, buildPowerCastPayload(client.clientEntID, 100));
+    await CombatHandler.handlePowerHit(
+        client as never,
+        buildPowerHitPayload(TutorialDungeonMechanics.TAG_UGO_BOSS_ID, client.clientEntID, 100)
+    );
+
+    assert.equal(Math.round(Number(canonicalBoss.hp)), maxHp - 100, 'canonical Tag Ugo HP should take server-authoritative damage');
+    const deltas = hpDeltasFor(client, TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    assert.equal(
+        deltas.some((delta) => delta >= maxHp),
+        false,
+        'damage sync must not refill the already-visible boss bar before applying damage'
+    );
+    assert.equal(
+        deltas.some((delta) => delta < 0),
+        true,
+        'visible boss should receive a negative HP delta when canonical HP drops'
+    );
+    assert.equal(
+        Math.round(Number(client.entities.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID)?.hp)),
+        maxHp - 100,
+        'viewer cache should match canonical Tag Ugo HP after damage sync'
+    );
+}
+
 function testTagUgoDoesNotRegenWhenPlayerRevivedWithStaleZeroHp(): void {
     const client = createFakeClient('RevivedBossFighter', 61010);
     client.currentRoomId = 11;
@@ -596,6 +688,136 @@ function testTagUgoDoesNotRegenAfterActiveMovementWithStaleSavedPositionAndZeroH
         'active owner movement should clear stale player-death regen arms'
     );
     assert.equal(canonicalBoss.aggroTargetEntityId, client.clientEntID, 'live player aggro should use scoped entity position, not stale saved coordinates');
+}
+
+function testTagUgoDoesNotRegenAfterActiveSelfFullUpdateWithStaleDeadState(): void {
+    const client = createFakeClient('SpawnedBossFighter', 61013);
+    client.currentRoomId = 11;
+    client.character.CurrentLevel.x = 22600;
+    client.character.CurrentLevel.y = 2950;
+    resetFor(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+
+    EntityHandler.sendInitialLevelEntities(client as never, 'TutorialDungeon');
+    const scope = getClientLevelScope(client as never);
+    const canonicalBoss = GlobalState.levelEntities.get(scope)?.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    assert.ok(canonicalBoss, 'Tag Ugo canonical server boss should be seeded for full-update regen regression');
+
+    canonicalBoss.hp = 500;
+    canonicalBoss.maxHp = 1000;
+    canonicalBoss.dead = false;
+    canonicalBoss.entState = EntityState.ACTIVE;
+    canonicalBoss.deathRegenArmedForPlayerKey = `${client.token}:${client.clientEntID}`;
+    canonicalBoss.lastCombatActivityAt = 1;
+    canonicalBoss.lastCombatRegenTickAt = 0;
+    canonicalBoss.aggroTargetEntityId = client.clientEntID;
+    canonicalBoss.aggroTargetToken = client.token;
+    canonicalBoss.x = 22695;
+    canonicalBoss.y = 2959;
+
+    client.authoritativeCurrentHp = 0;
+    client.enemyDeathRegenArmed = true;
+    const staleDeadPlayerEntity = {
+        id: client.clientEntID,
+        name: client.character.name,
+        isPlayer: true,
+        roomId: 11,
+        x: 100,
+        y: 100,
+        hp: 0,
+        maxHp: 1000,
+        dead: true,
+        entState: EntityState.DEAD
+    };
+    client.entities.set(client.clientEntID, staleDeadPlayerEntity);
+    GlobalState.levelEntities.get(scope)?.set(client.clientEntID, { ...staleDeadPlayerEntity });
+
+    EntityHandler.handleEntityFullUpdate(
+        client as never,
+        buildPlayerFullUpdate(client, 22600, 2950)
+    );
+
+    assert.equal(client.authoritativeCurrentHp > 0, true, 'active owner full-update did not repair stale zero player HP');
+    assert.equal(client.enemyDeathRegenArmed, false, 'active owner full-update should clear stale player-death regen arm');
+    assert.equal(client.entities.get(client.clientEntID)?.dead, false, 'local player entity should be active after owner full-update');
+    assert.equal(GlobalState.levelEntities.get(scope)?.get(client.clientEntID)?.dead, false, 'scoped player entity should be active after owner full-update');
+
+    (CombatHandler as any).processHostileOutOfCombatRegen(scope, canonicalBoss, 60_000);
+    assert.equal(canonicalBoss.hp, 500, 'Tag Ugo regenerated after an active owner full-update revived the combat presence');
+    assert.equal(
+        String(canonicalBoss.deathRegenArmedForPlayerKey ?? ''),
+        '',
+        'active owner full-update should clear stale player-death regen arms'
+    );
+}
+
+function testTagUgoSeesPlayerAfterCappedSpeedCorrection(): void {
+    const client = createFakeClient('CorrectedBossFighter', 61014);
+    client.currentRoomId = 11;
+    client.character.CurrentLevel.x = 100;
+    client.character.CurrentLevel.y = 100;
+    resetFor(client);
+    GlobalState.sessionsByToken.set(client.token, client as never);
+
+    EntityHandler.sendInitialLevelEntities(client as never, 'TutorialDungeon');
+    const scope = getClientLevelScope(client as never);
+    const canonicalBoss = GlobalState.levelEntities.get(scope)?.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    assert.ok(canonicalBoss, 'Tag Ugo canonical server boss should be seeded for capped movement regression');
+
+    canonicalBoss.hp = 500;
+    canonicalBoss.maxHp = 1000;
+    canonicalBoss.dead = false;
+    canonicalBoss.entState = EntityState.ACTIVE;
+    canonicalBoss.deathRegenArmedForPlayerKey = `${client.token}:${client.clientEntID}`;
+    canonicalBoss.lastCombatActivityAt = 1;
+    canonicalBoss.lastCombatRegenTickAt = 0;
+    canonicalBoss.aggroTargetEntityId = client.clientEntID;
+    canonicalBoss.aggroTargetToken = client.token;
+    canonicalBoss.x = 22695;
+    canonicalBoss.y = 2959;
+
+    client.authoritativeCurrentHp = 0;
+    client.enemyDeathRegenArmed = true;
+    const activePlayerEntity = {
+        id: client.clientEntID,
+        isPlayer: true,
+        roomId: 11,
+        x: 21450,
+        y: 2959,
+        hp: 0,
+        maxHp: 1000,
+        dead: false,
+        entState: EntityState.ACTIVE
+    };
+    client.entities.set(client.clientEntID, activePlayerEntity);
+    GlobalState.levelEntities.get(scope)?.set(client.clientEntID, { ...activePlayerEntity });
+
+    const now = Date.now();
+    MovementAuthority.reset(client as never, 'stale_visible_client', 21450, 2959, now - 635);
+    (client as any).movementAuthority.movementBudgetDistance = 674;
+    (client as any).movementAuthority.movementBudgetUpdatedAtMs = now - 635;
+    LevelHandler.handleEntityIncrementalUpdate(
+        client as never,
+        buildEntityActiveIncrementalPayload(client.clientEntID, 1502, 0)
+    );
+
+    const correctedPlayer = GlobalState.levelEntities.get(scope)?.get(client.clientEntID);
+    assert.equal(
+        Math.round(Number(correctedPlayer?.x)) > 21450,
+        true,
+        'speed correction should advance the authoritative player snapshot to the capped server position'
+    );
+    assert.equal(packetCount(client, 0x07) > 0, true, 'client should receive a movement correction after capped speed rejection');
+    assert.equal(client.authoritativeCurrentHp > 0, true, 'active capped movement should repair stale zero player HP');
+
+    canonicalBoss.x = Math.round(Number(correctedPlayer?.x));
+    (CombatHandler as any).processHostileOutOfCombatRegen(scope, canonicalBoss, 60_000);
+    assert.equal(canonicalBoss.hp, 500, 'Tag Ugo regenerated after the capped authoritative player position entered aggro');
+    assert.equal(
+        String(canonicalBoss.deathRegenArmedForPlayerKey ?? ''),
+        '',
+        'capped active movement should clear stale player-death regen arms'
+    );
 }
 
 function testTagUgoStillRegensAfterActualPlayerDeath(): void {
@@ -802,12 +1024,37 @@ async function testSharedTagUgoHpDeathAndReplayDedupe(): Promise<void> {
     const canonicalBoss = GlobalState.levelEntities.get(scope)?.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
     assert.ok(canonicalBoss);
     const initialHp = Number(canonicalBoss.hp);
+    const maxHp = Number(canonicalBoss.maxHp);
+    playerOne.sentPackets.length = 0;
+    playerTwo.sentPackets.length = 0;
     await CombatHandler.handlePowerCast(playerOne as never, buildPowerCastPayload(playerOne.clientEntID));
     const hit = buildPowerHitPayload(TutorialDungeonMechanics.TAG_UGO_BOSS_ID, playerOne.clientEntID, 100);
     await CombatHandler.handlePowerHit(playerOne as never, hit);
     assert.equal(Number(canonicalBoss.hp), initialHp - 100);
     assert.equal(playerOne.entities.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID)?.hp, canonicalBoss.hp);
     assert.equal(playerTwo.entities.get(TutorialDungeonMechanics.TAG_UGO_BOSS_ID)?.hp, canonicalBoss.hp);
+    const playerOneHpDeltas = hpDeltasFor(playerOne, TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    const playerTwoHpDeltas = hpDeltasFor(playerTwo, TutorialDungeonMechanics.TAG_UGO_BOSS_ID);
+    assert.equal(
+        playerOneHpDeltas.some((delta) => delta >= maxHp),
+        false,
+        'attacker should not receive a visible Tag Ugo refill before the authoritative damage correction'
+    );
+    assert.equal(
+        playerOneHpDeltas.some((delta) => delta === -100),
+        true,
+        'attacker should receive a visible Tag Ugo damage correction after the first hit'
+    );
+    assert.equal(
+        playerTwoHpDeltas.some((delta) => delta >= maxHp),
+        false,
+        'peer should not receive a visible Tag Ugo refill before the authoritative damage correction'
+    );
+    assert.equal(
+        playerTwoHpDeltas.some((delta) => delta === -100),
+        true,
+        'peer should receive a visible Tag Ugo damage correction after the first hit'
+    );
     const hpAfterFirstHit = Number(canonicalBoss.hp);
     await CombatHandler.handlePowerHit(playerOne as never, hit);
     assert.equal(Number(canonicalBoss.hp), hpAfterFirstHit, 'replayed hit from the same cast must be ignored');
@@ -959,8 +1206,11 @@ async function main(): Promise<void> {
     testOnlyTagUgoIsServerSpawned();
     testTagUgoUsesCanonicalServerStatsAndHpSync();
     testTagUgoUsesOneClientVisualBackedByCanonicalServerBoss();
+    await testTagUgoDamageSyncDoesNotRefillVisibleBossBar();
     testTagUgoDoesNotRegenWhenPlayerRevivedWithStaleZeroHp();
     testTagUgoDoesNotRegenAfterActiveMovementWithStaleSavedPositionAndZeroHp();
+    testTagUgoSeesPlayerAfterCappedSpeedCorrection();
+    testTagUgoDoesNotRegenAfterActiveSelfFullUpdateWithStaleDeadState();
     testTagUgoStillRegensAfterActualPlayerDeath();
     testPartyLeaderSideEnemiesRemainClientPrivate();
     await testBossDefeatWaitsForDefeatCutscene();
