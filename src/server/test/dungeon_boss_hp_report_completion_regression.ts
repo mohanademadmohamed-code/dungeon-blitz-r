@@ -113,7 +113,7 @@ function testAuthoredBossHpReportDuringDefeatCutscene(
     client.activeDungeonCutsceneScope = scope;
     client.activeDungeonCutsceneRoomId = boss.roomId;
     client.lastDungeonCutsceneStartAt = Date.now();
-    DungeonCompletionSystem.noteCutsceneStart(scope, boss.roomId, 1000 + ordinal);
+    DungeonCompletionSystem.noteCutsceneStart(scope, boss.roomId, client.lastDungeonCutsceneStartAt);
 
     CombatHandler.handleCharRegen(client as never, buildHpDeltaPayload(boss.id, -400));
     assert.equal(boss.hp, 1000, `${levelName}: non-lethal client HP telemetry mutated canonical HP`);
@@ -147,12 +147,12 @@ function testAuthoredBossHpReportDuringDefeatCutscene(
     );
 
     assert.equal(
-        DungeonCompletionSystem.evaluate(scope, 2100 + ordinal).ready,
+        DungeonCompletionSystem.evaluate(scope).ready,
         false,
         `${levelName}: completed while the authored defeat cutscene was active`
     );
     assert.equal(
-        DungeonCompletionSystem.noteCutsceneEnd(scope, boss.roomId, 2200 + ordinal),
+        DungeonCompletionSystem.noteCutsceneEnd(scope, boss.roomId, Date.now() + 1),
         true,
         `${levelName}: did not become ready after the authored defeat cutscene ended`
     );
@@ -213,6 +213,34 @@ function testBossHealResetsAccumulatedClientDamage(): void {
     clearRun(client);
 }
 
+function testPartyBossHpReportsAggregateAcrossParticipants(): void {
+    const first = createClient('OMM_Mission12', 40);
+    const second = createClient('OMM_Mission12', 41);
+    second.levelInstanceId = first.levelInstanceId;
+    const boss = createBoss(10_240, 'MagmaCyclopsBoss');
+    const scope = seedBosses(first, [boss]);
+    second.entities.set(boss.id, boss);
+    GlobalState.sessionsByToken.set(first.token, first as never);
+    GlobalState.sessionsByToken.set(second.token, second as never);
+    DungeonCompletionSystem.noteCutsceneStart(scope, boss.roomId, Date.now());
+
+    CombatHandler.handleCharRegen(first as never, buildHpDeltaPayload(boss.id, -600));
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).objectivesMet,
+        false,
+        'one participant completed a shared boss with only partial reported damage'
+    );
+    CombatHandler.handleCharRegen(second as never, buildHpDeltaPayload(boss.id, -400));
+    assert.equal(
+        DungeonCompletionSystem.evaluate(scope).objectivesMet,
+        true,
+        'party damage reports did not aggregate to the shared boss max HP'
+    );
+
+    clearRun(first);
+    GlobalState.sessionsByToken.delete(second.token);
+}
+
 async function testContributedBossDestroyOverridesStaleCanonicalHp(): Promise<void> {
     const client = createClient('OMM_Mission12Hard', 4);
     const boss = createBoss(10_204, 'MagmaCyclopsBossHard');
@@ -266,6 +294,7 @@ async function main(): Promise<void> {
         );
         testMultiBossHpReportsRequireEveryBoss();
         testBossHealResetsAccumulatedClientDamage();
+        testPartyBossHpReportsAggregateAcrossParticipants();
         await testContributedBossDestroyOverridesStaleCanonicalHp();
     } finally {
         combatHandler.fireAndForgetMissionWork = originalMissionWork;

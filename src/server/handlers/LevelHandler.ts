@@ -57,6 +57,7 @@ import { getCraftTownHomeInstanceId } from '../utils/HomeVisitGuard';
 import { TutorialDungeonMechanics } from '../core/TutorialDungeonMechanics';
 import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
 import { DungeonCompletionConditions } from '../core/DungeonCompletionConditions';
+import { MovementAuthority } from '../core/MovementAuthority';
 
 const db = new JsonAdapter();
 
@@ -1361,6 +1362,7 @@ export class LevelHandler {
             }
             LevelHandler.markRoomEventStarted(other, roomId);
             MissionHandler.noteDungeonCutsceneStart(other, roomId);
+            MovementAuthority.resetFromEntity(other, other.entities.get(other.clientEntID), 'cutscene_start');
             other.send(0xA5, payload);
         }
         LevelHandler.setServerAuthorityHostilesUntargetableForScope(scopeKey, roomId, true);
@@ -1400,6 +1402,7 @@ export class LevelHandler {
             if (!other.playerSpawned || getClientLevelScope(other) !== scopeKey) {
                 continue;
             }
+            MovementAuthority.resetFromEntity(other, other.entities.get(other.clientEntID), 'cutscene_end');
             other.send(0xA6, payload);
             MissionHandler.noteDungeonCutsceneEnd(other, roomId);
         }
@@ -2721,6 +2724,7 @@ export class LevelHandler {
         EntityHandler.removeOwnedEntities(client);
         client.clientEntID = 0;
         client.playerSpawned = false;
+        MovementAuthority.reset(client, 'level_transfer_clear');
         client.pendingLoot.clear();
         client.processedRewardSources.clear();
         client.triggeredLevelStates.clear();
@@ -3408,6 +3412,7 @@ export class LevelHandler {
         state?.participantKeys?.add(DungeonCompletionSystem.getParticipantKey(client));
         LevelHandler.markRoomEventStarted(client, roomId);
         MissionHandler.noteDungeonCutsceneStart(client, roomId);
+        MovementAuthority.resetFromEntity(client, client.entities.get(client.clientEntID), 'cutscene_start');
         EntityHandler.sendTutorialDungeonWorldSnapshot(client, 'cutscene_start');
     }
 
@@ -3458,6 +3463,7 @@ export class LevelHandler {
         sendToSource: boolean = false
     ): void {
         for (const other of LevelHandler.getSharedDungeonCutsceneParticipants(sourceClient, roomId, true)) {
+            MovementAuthority.resetFromEntity(other, other.entities.get(other.clientEntID), 'cutscene_end');
             if (sendToSource || other !== sourceClient) {
                 other.send(0xA6, payload);
             }
@@ -4784,9 +4790,12 @@ export class LevelHandler {
         const br = new BitReader(data);
         const entityId = br.readMethod4();
         const speedScaled = br.readMethod4();
-        const behaviorSpeedMod = speedScaled / 10000;
+        const behaviorSpeedMod = Math.max(0, Math.min(2.5, speedScaled / 10000));
 
         const entity = client.entities.get(entityId);
+        if (!entity || !EntityHandler.isClientOwnPlayerEntity(client, getClientLevelScope(client), entityId, entity)) {
+            return;
+        }
         if (entity) {
             entity.behaviorSpeedMod = behaviorSpeedMod;
         }
@@ -5137,6 +5146,33 @@ export class LevelHandler {
         const isSelf =
             EntityHandler.isClientOwnPlayerEntity(client, getClientLevelScope(client), entityId, ent) ||
             EntityHandler.isClientOwnPlayerEntity(client, getClientLevelScope(client), rawEntityId, ent);
+        if (!isSelf && Boolean((levelEntity ?? ent)?.isPlayer)) {
+            return;
+        }
+        if (isSelf && !isDefeatEntState) {
+            const movementResult = MovementAuthority.validateIncrementalMovement(client, ent, deltaX, deltaY);
+            if (!movementResult.accepted) {
+                const correctionDeltaX = Math.round(movementResult.lastAcceptedX - movementResult.attemptedX);
+                const correctionDeltaY = Math.round(movementResult.lastAcceptedY - movementResult.attemptedY);
+                if (correctionDeltaX !== 0 || correctionDeltaY !== 0) {
+                    MovementAuthority.armCorrectionGrace(client);
+                    client.send(
+                        0x07,
+                        LevelHandler.buildEntityIncrementalUpdatePayload(
+                            rawEntityId,
+                            correctionDeltaX,
+                            correctionDeltaY,
+                            0,
+                            entState,
+                            flags,
+                            false,
+                            0
+                        )
+                    );
+                }
+                return;
+            }
+        }
         const canonicalEntity = levelEntity ?? ent;
         const isEnemyCanonical =
             !isSelf &&

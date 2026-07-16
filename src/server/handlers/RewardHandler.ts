@@ -282,8 +282,12 @@ export class RewardHandler {
         if (client.entities.has(sourceId)) {
             return client.entities.get(sourceId);
         }
+        const aliasedSourceId = EntityHandler.resolveEntityAlias(client, sourceId);
+        if (aliasedSourceId !== sourceId && client.entities.has(aliasedSourceId)) {
+            return client.entities.get(aliasedSourceId);
+        }
         const levelMap = client.currentLevel ? GlobalState.levelEntities.get(getClientLevelScope(client)) : null;
-        return levelMap?.get(sourceId) ?? null;
+        return levelMap?.get(aliasedSourceId) ?? levelMap?.get(sourceId) ?? null;
     }
 
     private static resolveDropPosition(_client: Client, sourceEntity: any, fallbackX: number, fallbackY: number): { x: number; y: number } {
@@ -628,15 +632,15 @@ export class RewardHandler {
     }
 
     private static getRewardSourceReason(sourceEntity: any): LootReason {
-        if (RewardHandler.isHostileRewardSource(sourceEntity)) {
-            return 'legacy_enemy_reward';
-        }
-
         const entName = String(sourceEntity?.name ?? sourceEntity?.EntName ?? sourceEntity?.entName ?? '').trim();
         const entType = entName ? GameData.getEntType(entName) ?? {} : {};
         const behavior = String(entType.Behavior ?? sourceEntity?.behavior ?? sourceEntity?.Behavior ?? '').trim();
         if (/treasurechest/i.test(entName) || behavior === 'TreasureChest') {
             return 'chest_reward';
+        }
+
+        if (RewardHandler.isHostileRewardSource(sourceEntity)) {
+            return 'legacy_enemy_reward';
         }
 
         return 'unknown';
@@ -991,9 +995,14 @@ export class RewardHandler {
             }
             return false;
         }
-        client.processedRewardSources.add(rewardKey);
 
         const resolved = RewardHandler.maybeOverrideDungeonReward(client, sourceEntity, reward);
+        const hasReward = resolved.exp > 0 || resolved.gold > 0 || resolved.hpGain > 0 ||
+            resolved.gearId > 0 || resolved.materialId > 0 || resolved.dyeId > 0;
+        if (!hasReward) {
+            return false;
+        }
+        client.processedRewardSources.add(rewardKey);
         const reason = context.reason ?? 'unknown';
         const caller = context.caller ?? 'unknown';
         if (context.sourceLootDropNonce) {
@@ -1150,6 +1159,9 @@ export class RewardHandler {
         const reason = RewardHandler.getRewardSourceReason(sourceEntity);
         const caller = 'handleGrantReward';
         const levelScope = getClientLevelScope(client);
+        if (!sourceEntity || reason === 'unknown') {
+            return;
+        }
         if (
             RewardHandler.requiresCanonicalHostileLootContext(client.currentLevel, sourceEntity) &&
             reason === 'legacy_enemy_reward'

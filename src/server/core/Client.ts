@@ -6,6 +6,7 @@ import { JsonAdapter } from '../database/JsonAdapter';
 import type { DungeonRunStats } from './DungeonRunStats';
 import { clearStoredDungeonSnapshot } from './DungeonSnapshot';
 import { LevelConfig } from './LevelConfig';
+import { MovementAuthority, MovementAuthorityState } from './MovementAuthority';
 
 const db = new JsonAdapter();
 const SOCKET_POLICY_REQUEST = '<policy-file-request/>';
@@ -134,6 +135,8 @@ export class Client {
     private static readonly DEFAULT_DEFERRED_CHARACTER_SAVE_MS = 150;
     private static readonly COMBAT_REWARD_DEFERRED_CHARACTER_SAVE_MS = 2500;
     private static readonly PENDING_LOOT_DEFERRED_CHARACTER_SAVE_MS = 750;
+    private static readonly MAX_BUFFERED_PACKET_BYTES = 1024 * 1024;
+    private static readonly MAX_QUEUED_PACKETS = 2048;
     private static readonly QUIET_SOCKET_ERROR_CODES = new Set([
         'ECONNABORTED',
         'ECONNRESET',
@@ -144,6 +147,7 @@ export class Client {
     public router: PacketRouter;
     private buffer: Buffer;
     private packetQueue: Promise<void>;
+    private queuedPacketCount: number;
     private outboundUncorkScheduled: boolean;
     private rawBytesIn: number;
     private rawBytesOut: number;
@@ -181,6 +185,7 @@ export class Client {
     public syncQuestProgress: number | undefined;
     public pendingTransferUntil: number = 0;
     public mountTransferGraceUntil: number = 0;
+    public movementAuthority: MovementAuthorityState = MovementAuthority.createState();
     public startedRoomEvents: Set<string> = new Set();
     public knownEntityIds: Set<number> = new Set();
     public entityIdAliases: Map<number, number> = new Map();
@@ -231,6 +236,7 @@ export class Client {
         this.router = router;
         this.buffer = Buffer.alloc(0);
         this.packetQueue = Promise.resolve();
+        this.queuedPacketCount = 0;
         this.outboundUncorkScheduled = false;
         this.rawBytesIn = 0;
         this.rawBytesOut = 0;
@@ -244,6 +250,13 @@ export class Client {
     private onData(data: Buffer): void {
         this.rawBytesIn += data.length;
         this.buffer = Buffer.concat([this.buffer, data]);
+
+        if (this.buffer.length > Client.MAX_BUFFERED_PACKET_BYTES) {
+            console.warn(`[Client] Closing oversized buffered input bytes=${this.buffer.length} token=${this.token}`);
+            this.buffer = Buffer.alloc(0);
+            this.socket.destroy();
+            return;
+        }
 
         if (this.tryServeSocketPolicy()) {
             return;
@@ -262,10 +275,21 @@ export class Client {
             const payload = Buffer.from(this.buffer.subarray(4, total));
             this.buffer = this.buffer.subarray(total);
 
+            if (this.queuedPacketCount >= Client.MAX_QUEUED_PACKETS) {
+                console.warn(`[Client] Closing excessive packet queue count=${this.queuedPacketCount} token=${this.token}`);
+                this.buffer = Buffer.alloc(0);
+                this.socket.destroy();
+                return;
+            }
+            this.queuedPacketCount += 1;
+
             this.packetQueue = this.packetQueue
                 .then(() => this.router.handle(this, packetId, payload))
                 .catch((err: unknown) => {
                     console.error(`[Client] Error handling packet 0x${packetId.toString(16)}:`, err);
+                })
+                .finally(() => {
+                    this.queuedPacketCount = Math.max(0, this.queuedPacketCount - 1);
                 });
         }
     }
@@ -428,6 +452,7 @@ export class Client {
         this.syncQuestProgress = undefined;
         this.pendingTransferUntil = 0;
         this.mountTransferGraceUntil = 0;
+        MovementAuthority.reset(this, 'gameplay_state_clear');
         this.startedRoomEvents.clear();
         this.knownEntityIds.clear();
         this.entityIdAliases.clear();

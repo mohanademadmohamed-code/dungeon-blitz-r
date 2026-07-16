@@ -653,6 +653,17 @@ async function testSharedTagUgoHpDeathAndReplayDedupe(): Promise<void> {
     assert.equal(packetCount(playerOne, 0x0D) > 0, true);
     assert.equal(packetCount(playerTwo, 0x0D) > 0, true);
 
+    (playerOne as any).authoritativeCurrentHp = 0;
+    (CombatHandler as any).armBossRegenForPlayerDeath(playerOne, Date.now(), true);
+    (CombatHandler as any).processHostileOutOfCombatRegen(scope, canonicalBoss, Date.now() + 60_000);
+    assert.equal(canonicalBoss.hp, 0, 'terminal Tag Ugo regenerated after a player death');
+    assert.equal(canonicalBoss.dead, true, 'terminal Tag Ugo returned to an active state');
+    assert.equal(
+        String(canonicalBoss.deathRegenArmedForPlayerKey ?? ''),
+        '',
+        'terminal Tag Ugo kept a player-death regen arm'
+    );
+
     const lateJoiner = createFakeClient('BossLateJoiner', 61303);
     lateJoiner.currentRoomId = 11;
     lateJoiner.levelInstanceId = playerOne.levelInstanceId;

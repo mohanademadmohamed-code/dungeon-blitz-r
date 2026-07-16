@@ -41,6 +41,20 @@ export function clearRoomBossState(): void {
     roomBossMarkersByScope.clear();
 }
 
+export function getRoomBossAwareRoomId(entity: any, fallback: number = -1): number {
+    const liveBossRoomId = Number(entity?.roomBossRoomId ?? NaN);
+    if (Number.isFinite(liveBossRoomId) && liveBossRoomId >= 0) {
+        return Math.round(liveBossRoomId);
+    }
+
+    const authoredRoomId = Number(entity?.roomId ?? NaN);
+    if (Number.isFinite(authoredRoomId) && authoredRoomId >= 0) {
+        return Math.round(authoredRoomId);
+    }
+
+    return Number.isFinite(fallback) && fallback >= 0 ? Math.round(fallback) : -1;
+}
+
 export function markRoomBossEntity(levelScope: string, bossId: number, roomId: number, bossName: string = ''): void {
     const normalizedBossId = Math.max(0, Math.round(Number(bossId ?? 0)));
     if (!levelScope || normalizedBossId <= 0) {

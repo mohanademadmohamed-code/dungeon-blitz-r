@@ -264,28 +264,20 @@ function verifyIntroCutsceneDoesNotPermanentlyBlockCompletion(
         scenario.levelScope,
         baseTime + scenario.entities.length + 10
     );
-    if (scenario.condition.cutscene?.requiredAfterObjectives) {
-        assert.strictEqual(
-            beforeClose.ready,
-            false,
-            `${levelName}: explicit post-objective cutscene gate was bypassed`
-        );
-        assert.strictEqual(
-            DungeonCompletionSystem.noteCutsceneEnd(
-                scenario.levelScope,
-                7,
-                baseTime + scenario.entities.length + 11
-            ),
-            true,
-            `${levelName}: pre-objective intro close after objectives did not release the explicit gate`
-        );
-    } else {
-        assert.strictEqual(
-            beforeClose.ready,
-            true,
-            `${levelName}: unmatched pre-objective intro cutscene permanently blocked completion`
-        );
-    }
+    assert.strictEqual(
+        beforeClose.ready,
+        false,
+        `${levelName}: completion bypassed an active authoritative cutscene`
+    );
+    assert.strictEqual(
+        DungeonCompletionSystem.noteCutsceneEnd(
+            scenario.levelScope,
+            7,
+            baseTime + scenario.entities.length + 11
+        ),
+        true,
+        `${levelName}: completion did not release after the active cutscene closed`
+    );
 
     cleanupScenario(scenario);
 }
@@ -350,6 +342,39 @@ function runScenario(levelName: string, participantCount: 1 | 2, ordinal: number
     cleanupScenario(scenario);
 }
 
+function verifyOverlappingAndReorderedCutscenes(): void {
+    const overlapping = createScenario('OMM_Mission2', 'overlapping-cutscenes');
+    const boss = overlapping.entities[0];
+    boss.roomId = 11;
+    DungeonCompletionSystem.noteCutsceneStart(overlapping.levelScope, 11, 10_000);
+    DungeonCompletionSystem.noteCutsceneStart(overlapping.levelScope, 5, 10_001);
+    defeatEntity(overlapping, boss, 10_002);
+    assert.equal(
+        DungeonCompletionSystem.noteCutsceneEnd(overlapping.levelScope, 5, 10_003),
+        false,
+        'ending an unrelated overlapping cutscene released completion while the boss cutscene remained active'
+    );
+    assert.equal(
+        DungeonCompletionSystem.noteCutsceneEnd(overlapping.levelScope, 11, 10_004),
+        true,
+        'boss cutscene close did not release completion after another room overlapped it'
+    );
+    cleanupScenario(overlapping);
+
+    const reordered = createScenario('OMM_Mission2', 'reordered-cutscene');
+    const reorderedBoss = reordered.entities[0];
+    reorderedBoss.roomId = 11;
+    DungeonCompletionSystem.noteCutsceneStart(reordered.levelScope, 11, 20_000, true);
+    DungeonCompletionSystem.noteCutsceneEnd(reordered.levelScope, 11, 20_100);
+    defeatEntity(reordered, reorderedBoss, 20_101);
+    assert.equal(
+        DungeonCompletionSystem.evaluate(reordered.levelScope, 20_102).ready,
+        true,
+        'late final HP/death report after cutscene close left completion waiting forever'
+    );
+    cleanupScenario(reordered);
+}
+
 function main(): void {
     const dataDir = path.resolve(__dirname, '..', 'data');
     LevelConfig.load(dataDir);
@@ -369,6 +394,7 @@ function main(): void {
     NEVER_ENDING_DUNGEON_LEVELS.forEach((levelName, index) => {
         verifyIntroCutsceneDoesNotPermanentlyBlockCompletion(levelName, index);
     });
+    verifyOverlappingAndReorderedCutscenes();
 
     assert.strictEqual(GlobalState.dungeonCompletions.size, 0, 'Matrix leaked dungeon completion states');
     console.log(

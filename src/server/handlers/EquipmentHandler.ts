@@ -317,15 +317,13 @@ export class EquipmentHandler {
         }
 
         const equippedGears = EquipmentHandler.ensureEquippedGears(client);
-        const nextGear = gearId > 0
-            ? EquipmentHandler.normalizeGearEntry(
-                EquipmentHandler.resolveOwnedGear(client, gearId) ?? {
-                    gearID: gearId,
-                    tier: 0,
-                    runes: [0, 0, 0],
-                    colors: [0, 0]
-                }
-            )
+        const ownedGear = gearId > 0 ? EquipmentHandler.resolveOwnedGear(client, gearId) : null;
+        if (gearId > 0 && !ownedGear) {
+            console.warn(`[EquipmentAuthority] rejected unowned gear userId=${client.userId ?? 0} gearId=${gearId} slot=${slot}`);
+            return;
+        }
+        const nextGear = ownedGear
+            ? EquipmentHandler.normalizeGearEntry(ownedGear)
             : EquipmentHandler.emptyGearEntry();
 
         equippedGears[index] = nextGear;

@@ -33,6 +33,15 @@ export type DungeonCompletionPhase =
     | 'finalizing'
     | 'completed';
 
+export type DungeonCompletionCutsceneState = {
+    roomId: number;
+    startedAt: number;
+    endedAt: number;
+    startedSequence: number;
+    endedSequence: number;
+    completionEligibleAtStart: boolean;
+};
+
 export type DungeonCompletionRunState = {
     levelScope: string;
     levelName: string;
@@ -51,11 +60,14 @@ export type DungeonCompletionRunState = {
     cutsceneEndedAt: number;
     cutsceneStartedSequence: number;
     cutsceneEndedSequence: number;
+    cutscenesByRoom: Map<number, DungeonCompletionCutsceneState>;
+    objectiveRoomIds: Set<number>;
     objectivesMetAt: number;
     objectivesMetSequence: number;
     readyAt: number;
     finalizingParticipants: Set<string>;
     completedParticipants: Set<string>;
+    enrolledParticipants: Set<string>;
     completionRequestCount: number;
 };
 
