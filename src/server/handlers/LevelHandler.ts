@@ -109,6 +109,10 @@ type DungeonCutsceneRoomThoughtDelivery = 'level' | 'local' | 'suppress';
 
 export class LevelHandler {
 
+    private static readonly pendingSharedProgressRefreshes = new Map<string, NodeJS.Timeout>();
+    private static readonly sharedProgressRefreshMetrics = new Map<string, { requested: number; deduplicated: number; executed: number }>();
+    private static readonly SHARED_PROGRESS_REFRESH_DEDUPE_MS = 25;
+
     private static deferMissionWork(client: Client, label: string, work: DeferredMissionWork): void {
         const executeWork = (): void => {
             void work().catch((error) => {
@@ -224,10 +228,10 @@ export class LevelHandler {
     ): string {
         return LevelConfig.resolveSafeReturnLevel(
             [
+                oldLevel,
                 syncState?.syncEntryLevel,
                 client.entryLevel,
                 character?.PreviousLevel?.name,
-                oldLevel,
                 character?.CurrentLevel?.name
             ],
             {
@@ -243,7 +247,7 @@ export class LevelHandler {
         entity: { x?: number; y?: number } | null | undefined
     ): void {
         const normalizedSourceLevel = LevelConfig.normalizeLevelName(sourceLevel);
-        if (!character || !normalizedSourceLevel || LevelConfig.isDungeonLevel(normalizedSourceLevel)) {
+        if (!character || !normalizedSourceLevel || !LevelConfig.isSaveAllowedLevel(normalizedSourceLevel)) {
             return;
         }
 
@@ -288,6 +292,7 @@ export class LevelHandler {
         target.startedRoomEvents = new Set(source.startedRoomEvents);
         target.triggeredLevelStates = new Set(source.triggeredLevelStates);
         target.dungeonRun = cloneDungeonRunStats(source.dungeonRun);
+        GlobalState.refreshSessionIndexes(target);
     }
 
     private static getActiveDoorTravelContext(
@@ -314,6 +319,51 @@ export class LevelHandler {
             sourceDoorId: Math.round(sourceDoorId),
             targetLevel
         };
+    }
+
+    private static resolveDoorResponseId(
+        currentLevelName: string | null | undefined,
+        targetLevelName: string | null | undefined,
+        requestedDoorId: number
+    ): number {
+        const currentLevel = LevelConfig.normalizeLevelName(currentLevelName);
+        const targetLevel = LevelConfig.normalizeLevelName(targetLevelName);
+        const normalizedDoorId = Math.max(0, Math.round(Number(requestedDoorId) || 0));
+        if (currentLevel && targetLevel && LevelConfig.isDungeonLevel(currentLevel)) {
+            // The dungeon's completion door id belongs to the dungeon map. Resolve the reverse
+            // DoorTypes link so the destination map selects the authored door that entered this
+            // dungeon (for example CH_MiniMission6 -> CemeteryHill door 206).
+            const entranceDoorId = LevelConfig.getDungeonEntranceDoorId(currentLevel, targetLevel);
+            if (entranceDoorId !== null) {
+                return entranceDoorId;
+            }
+
+            // Some dungeons have no authored reverse link. Door 0 lets their explicit transfer
+            // coordinates remain the fallback instead of selecting an unrelated destination door.
+            if (
+                (normalizedDoorId === 0 || normalizedDoorId === 2) &&
+                !LevelConfig.isDungeonLevel(targetLevel)
+            ) {
+                return 0;
+            }
+        }
+
+        return normalizedDoorId;
+    }
+
+    private static shouldSendTransferCoordinates(
+        currentLevelName: string | null | undefined,
+        targetLevelName: string | null | undefined,
+        hasCoordinates: boolean,
+        preferExplicitCoordinates: boolean
+    ): boolean {
+        if (!hasCoordinates) {
+            return false;
+        }
+        if (preferExplicitCoordinates) {
+            return true;
+        }
+        return LevelConfig.getDungeonEntranceDoorId(currentLevelName, targetLevelName) === null;
     }
 
     private static findActiveTransferSession(userId: number | null, characterName: string | null | undefined): Client | null {
@@ -601,7 +651,7 @@ export class LevelHandler {
         const ownCharacterKey = normalizeCharacterKey(client.character?.name);
         const candidates: TransferSyncAnchorCandidate[] = [];
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInParty(partyId)) {
             if (other === client || !GlobalState.isSessionOpen(other) || !areClientsInSameParty(client, other)) {
                 continue;
             }
@@ -676,6 +726,7 @@ export class LevelHandler {
 
         if (roomId >= 0) {
             client.currentRoomId = roomId;
+            GlobalState.refreshSessionIndexes(client);
         }
 
         for (const startedRoomId of startedRoomIds) {
@@ -814,16 +865,34 @@ export class LevelHandler {
             const entryEntity = client.clientEntID > 0 ? client.entities.get(client.clientEntID) : null;
             const sourceLevel = LevelConfig.normalizeLevelName(client.currentLevel);
             if (
-                !syncEntryHasCoord &&
-                syncEntryLevel &&
-                sourceLevel === syncEntryLevel &&
+                sourceLevel &&
                 !LevelConfig.isDungeonLevel(sourceLevel) &&
-                Number.isFinite(Number(entryEntity?.x)) &&
-                Number.isFinite(Number(entryEntity?.y))
+                LevelConfig.isSaveAllowedLevel(sourceLevel)
             ) {
-                syncEntryX = Math.round(Number(entryEntity.x));
-                syncEntryY = Math.round(Number(entryEntity.y));
-                syncEntryHasCoord = true;
+                // Dungeon progress and instance state are shared, but the exit point belongs to
+                // the individual player. Never replace this player's entrance with the party
+                // anchor's region or coordinates.
+                syncEntryLevel = sourceLevel;
+                const liveEntryX = Number(entryEntity?.x);
+                const liveEntryY = Number(entryEntity?.y);
+                const recordedEntry = LevelConfig.resolveDungeonEntryCoordinates(
+                    normalizedTargetLevel,
+                    sourceLevel,
+                    client.character
+                );
+                if (Number.isFinite(liveEntryX) && Number.isFinite(liveEntryY)) {
+                    syncEntryX = Math.round(liveEntryX);
+                    syncEntryY = Math.round(liveEntryY);
+                    syncEntryHasCoord = true;
+                } else if (recordedEntry.hasCoord) {
+                    syncEntryX = Math.round(recordedEntry.x);
+                    syncEntryY = Math.round(recordedEntry.y);
+                    syncEntryHasCoord = true;
+                } else {
+                    syncEntryX = undefined;
+                    syncEntryY = undefined;
+                    syncEntryHasCoord = false;
+                }
             }
             const dungeonEntrySpawnOverride =
                 !anchor &&
@@ -879,9 +948,10 @@ export class LevelHandler {
         activeCharacter: any,
         oldLevel: string,
         targetLevel: string,
-        syncState: LevelSyncState | null
+        syncState: LevelSyncState | null,
+        preferExplicitSpawn: boolean = false
     ): { x: number; y: number; hasCoord: boolean } {
-        if (syncState?.hasCoord) {
+        if (preferExplicitSpawn && syncState?.hasCoord) {
             return {
                 x: Math.round(Number(syncState.x ?? 0)),
                 y: Math.round(Number(syncState.y ?? 0)),
@@ -908,12 +978,48 @@ export class LevelHandler {
             };
         }
 
+        if (syncState?.hasCoord) {
+            return {
+                x: Math.round(Number(syncState.x ?? 0)),
+                y: Math.round(Number(syncState.y ?? 0)),
+                hasCoord: true
+            };
+        }
+
         const activeDoorId = (
             LevelConfig.normalizeLevelName(client.lastDoorTargetLevel) === normalizedTargetLevel
         )
             ? client.lastDoorId
             : null;
         return LevelConfig.getSpawnCoordinates(activeCharacter, oldLevel, targetLevel, activeDoorId);
+    }
+
+    private static readonly HOME_RETURN_GROUNDING_LIFT_PX = 64;
+
+    private static stabilizeHomeReturnSpawn(
+        oldLevel: string,
+        targetLevel: string,
+        spawn: { x: number; y: number; hasCoord: boolean }
+    ): { x: number; y: number; hasCoord: boolean } {
+        const normalizedOldLevel = LevelConfig.normalizeLevelName(oldLevel);
+        const normalizedTargetLevel = LevelConfig.normalizeLevelName(targetLevel);
+        if (
+            !spawn.hasCoord ||
+            (normalizedOldLevel !== 'CraftTown' && normalizedOldLevel !== 'CraftTownTutorial') ||
+            !normalizedTargetLevel ||
+            normalizedTargetLevel === 'CraftTown' ||
+            normalizedTargetLevel === 'CraftTownTutorial'
+        ) {
+            return spawn;
+        }
+
+        // The Flash client projects an explicit spawn onto nearby collision. Starting slightly
+        // above the saved point prevents elevated or multi-floor terrain from loading below it.
+        return {
+            x: Math.round(spawn.x),
+            y: Math.round(spawn.y) - LevelHandler.HOME_RETURN_GROUNDING_LIFT_PX,
+            hasCoord: true
+        };
     }
 
     private static readonly CLIENT_SPAWN_FALLBACK_MS = 5000;
@@ -1079,8 +1185,8 @@ export class LevelHandler {
 
     private static broadcastSharedDungeonQuestProgress(levelScope: string, progress: number): void {
         const payload = LevelHandler.buildQuestProgressPayload(progress);
-        for (const other of GlobalState.sessionsByToken.values()) {
-            if (!other.playerSpawned || getClientLevelScope(other) !== levelScope) {
+        for (const other of GlobalState.getSessionsInLevelScope(levelScope)) {
+            if (!other.playerSpawned) {
                 continue;
             }
 
@@ -1113,6 +1219,65 @@ export class LevelHandler {
         return progress;
     }
 
+    static scheduleSharedDungeonQuestProgressRefresh(
+        levelScope: string | null | undefined,
+        options: { delayMs?: number; reason?: string; retryIf?: (progress: number) => boolean; retryDelayMs?: number } = {}
+    ): void {
+        const scopeKey = String(levelScope ?? '').trim();
+        if (!scopeKey) {
+            return;
+        }
+
+        const metric = LevelHandler.sharedProgressRefreshMetrics.get(scopeKey) ?? {
+            requested: 0,
+            deduplicated: 0,
+            executed: 0
+        };
+        metric.requested += 1;
+        if (LevelHandler.pendingSharedProgressRefreshes.has(scopeKey)) {
+            metric.deduplicated += 1;
+            LevelHandler.sharedProgressRefreshMetrics.set(scopeKey, metric);
+            return;
+        }
+
+        const executeRefresh = (): void => {
+            metric.executed += 1;
+            LevelHandler.sharedProgressRefreshMetrics.set(scopeKey, metric);
+            const progress = LevelHandler.refreshSharedDungeonQuestProgress(scopeKey);
+            if (options.retryIf?.(progress)) {
+                const pendingTimer = LevelHandler.pendingSharedProgressRefreshes.get(scopeKey);
+                if (pendingTimer) {
+                    clearTimeout(pendingTimer);
+                }
+                LevelHandler.pendingSharedProgressRefreshes.delete(scopeKey);
+                LevelHandler.scheduleSharedDungeonQuestProgressRefresh(scopeKey, {
+                    delayMs: Math.max(1, Math.round(Number(options.retryDelayMs ?? 150))),
+                    reason: `${options.reason ?? 'progress_refresh'}_retry`
+                });
+            }
+        };
+
+        const delayMs = Math.max(0, Math.round(Number(options.delayMs ?? 0)));
+        const timer = setTimeout(() => {
+            if (LevelHandler.pendingSharedProgressRefreshes.get(scopeKey) === timer) {
+                LevelHandler.pendingSharedProgressRefreshes.delete(scopeKey);
+            }
+            if (delayMs > 0) {
+                executeRefresh();
+            }
+        }, delayMs > 0 ? delayMs : LevelHandler.SHARED_PROGRESS_REFRESH_DEDUPE_MS);
+        timer.unref?.();
+        LevelHandler.pendingSharedProgressRefreshes.set(scopeKey, timer);
+        LevelHandler.sharedProgressRefreshMetrics.set(scopeKey, metric);
+        if (delayMs === 0) {
+            executeRefresh();
+        }
+    }
+
+    static getSharedDungeonProgressRefreshMetrics(levelScope: string): { requested: number; deduplicated: number; executed: number } {
+        return { ...(LevelHandler.sharedProgressRefreshMetrics.get(levelScope) ?? { requested: 0, deduplicated: 0, executed: 0 }) };
+    }
+
     private static maybeAutoCompleteSharedDungeon(levelScope: string, sharedState: any): void {
         if (!sharedState) {
             return;
@@ -1128,8 +1293,8 @@ export class LevelHandler {
         }
 
         if (!authorityClient) {
-            for (const other of GlobalState.sessionsByToken.values()) {
-                if (other.playerSpawned && getClientLevelScope(other) === levelScope) {
+            for (const other of GlobalState.getSessionsInLevelScope(levelScope)) {
+                if (other.playerSpawned) {
                     authorityClient = other;
                     break;
                 }
@@ -1244,7 +1409,7 @@ export class LevelHandler {
         const scopeKey = getLevelScopeKey(levelName, levelInstanceId);
         markRoomBossEntity(scopeKey, bossId, roomId, bossName);
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(scopeKey)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== scopeKey) {
                 continue;
             }
@@ -1267,7 +1432,7 @@ export class LevelHandler {
         const payload = bb.toBuffer();
         const scopeKey = getLevelScopeKey(levelName, levelInstanceId);
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(scopeKey)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== scopeKey) {
                 continue;
             }
@@ -1302,7 +1467,7 @@ export class LevelHandler {
         const scopeKey = getLevelScopeKey(levelName, levelInstanceId);
         const fallbackToGeneric = LevelHandler.isEnemyRoomThought(levelName, levelInstanceId, entityId);
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(scopeKey)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== scopeKey) {
                 continue;
             }
@@ -1356,7 +1521,7 @@ export class LevelHandler {
             return false;
         }
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(scopeKey)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== scopeKey) {
                 continue;
             }
@@ -1398,7 +1563,7 @@ export class LevelHandler {
             return false;
         }
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(scopeKey)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== scopeKey) {
                 continue;
             }
@@ -1431,7 +1596,7 @@ export class LevelHandler {
             return;
         }
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(scopeKey)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== scopeKey) {
                 continue;
             }
@@ -1511,7 +1676,7 @@ export class LevelHandler {
 
             entity.untargetable = untargetable;
             const canonicalId = Math.max(0, Math.round(Number(entity.id ?? entityId) || 0));
-            for (const viewer of GlobalState.sessionsByToken.values()) {
+            for (const viewer of GlobalState.getSessionsInLevelScope(levelScope)) {
                 if (!viewer.playerSpawned || getClientLevelScope(viewer) !== levelScope) {
                     continue;
                 }
@@ -2736,6 +2901,7 @@ export class LevelHandler {
         client.syncAnchorStartedAt = 0;
         client.syncAnchorToken = 0;
         client.syncAnchorCharacterName = '';
+        GlobalState.refreshSessionIndexes(client);
     }
 
     private static forLevelRecipients(client: Client, includeSender: boolean = false): Client[] {
@@ -2745,7 +2911,7 @@ export class LevelHandler {
         }
 
         const recipients: Client[] = [];
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(getClientLevelScope(client))) {
             if (!other.playerSpawned || !areClientsInSameLevelScope(client, other)) {
                 continue;
             }
@@ -2804,6 +2970,7 @@ export class LevelHandler {
                 ? Math.round(Number(client.currentRoomId))
                 : -1;
             client.currentRoomId = roomId;
+            GlobalState.refreshSessionIndexes(client);
             if (previousRoomId >= 0 && previousRoomId !== roomId) {
                 PetHandler.armMountTravelProtection(client, 4000, true);
             }
@@ -2822,7 +2989,7 @@ export class LevelHandler {
             return false;
         }
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(levelScope)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== levelScope) {
                 continue;
             }
@@ -2846,7 +3013,7 @@ export class LevelHandler {
         const clientRoomId = Number.isFinite(Number(client.currentRoomId))
             ? Math.round(Number(client.currentRoomId))
             : -1;
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(levelScope)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== levelScope) {
                 continue;
             }
@@ -2980,6 +3147,7 @@ export class LevelHandler {
         for (const other of LevelHandler.forLevelRecipients(client, true)) {
             if (!other.triggeredLevelStates.has(triggerKey)) {
                 other.currentRoomId = roomId;
+                GlobalState.refreshSessionIndexes(other);
                 if (!LevelHandler.hasRoomEventStarted(other, roomId)) {
                     LevelHandler.sendRoomEventStart(other, roomId, true);
                 }
@@ -3308,6 +3476,56 @@ export class LevelHandler {
         });
     }
 
+    static maybeFinishSDMission4AfterBossDialogue(
+        client: Client,
+        text: string
+    ): void {
+        if (client.currentLevel !== 'SD_Mission4') {
+            return;
+        }
+
+        const normalizedText = String(text ?? '')
+            .replace(/[<>]/g, '')
+            .trim();
+
+        if (normalizedText !== 'It really is quite nice here...') {
+            return;
+        }
+
+        const levelScope = getClientLevelScope(client);
+
+        const roomId =
+            Math.max(
+                0,
+                Math.round(Number(client.currentRoomId ?? 0))
+            );
+
+        const now = Date.now();
+
+        const bossEntity = {
+            id: -1004,
+            name: 'OasisVizier',
+            displayName: 'Dejih the Ogre-Magus',
+            roomBossName: 'Dejih the Ogre-Magus',
+            roomId,
+            roomBossRoomId: roomId,
+            isRoomBoss: true,
+            roomBoss: true,
+            team: EntityTeam.ENEMY,
+            isPlayer: false,
+            dead: true,
+            destroyed: true,
+            hp: 0,
+            entState: EntityState.DEAD,
+            deathFinalizedAt: now
+        };
+
+        DungeonCompletionSystem.noteEntityDefeated(
+            levelScope,
+            bossEntity
+        );
+    }
+
     private static getSharedDungeonCutsceneKey(levelScope: string, roomId: number): string {
         return `${levelScope}:${Math.max(0, Math.round(Number(roomId) || 0))}`;
     }
@@ -3321,7 +3539,7 @@ export class LevelHandler {
     }
 
     private static hasSharedDungeonCutscenePeer(client: Client): boolean {
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(getClientLevelScope(client))) {
             if (other !== client && other.playerSpawned && areClientsInSameLevelScope(client, other)) {
                 return true;
             }
@@ -3542,7 +3760,7 @@ export class LevelHandler {
             return !EntityHandler.isClientOwnPlayerEntity(client, levelScope, id, entity);
         }
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(levelScope)) {
             if (
                 other !== client &&
                 other.playerSpawned &&
@@ -3598,7 +3816,7 @@ export class LevelHandler {
         }
 
         const participants: Client[] = [];
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(levelScope)) {
             if (!other.playerSpawned || getClientLevelScope(other) !== levelScope) {
                 continue;
             }
@@ -4234,8 +4452,8 @@ export class LevelHandler {
         GlobalState.pendingExtended.set(token, sendExtended);
     }
 
-    private static shouldSendExtendedOnTransfer(targetLevel: string): boolean {
-        return targetLevel === 'CraftTown';
+    private static shouldSendExtendedOnTransfer(_targetLevel: string): boolean {
+        return false;
     }
 
     private static isDifferentCharacter(left: Character | null | undefined, right: Character | null | undefined): boolean {
@@ -4696,7 +4914,13 @@ export class LevelHandler {
             client.armPendingTransferGrace();
             PetHandler.armMountTravelProtection(client, 5000, false);
             const bb = new BitBuffer();
-            bb.writeMethod4(doorId);
+            const responseDoorId = LevelHandler.resolveDoorResponseId(currentLevel, targetLevel, doorId);
+            if (responseDoorId !== doorId) {
+                console.log(
+                    `[Level] Dungeon exit door response ${currentLevel} -> ${targetLevel}: ${doorId} -> ${responseDoorId}`
+                );
+            }
+            bb.writeMethod4(responseDoorId);
             bb.writeMethod13(targetLevel);
             client.sendBitBuffer(0x2E, bb);
         }
@@ -4898,6 +5122,12 @@ export class LevelHandler {
         const roomId = br.readMethod9();
         LevelHandler.cacheRoomId(client, roomId);
 
+        // Despite the historical handler name, the client emits 0xAD from
+        // BossFight when every boss slot is at zero HP and the boss UI closes.
+        // Cue-owned bosses can be entirely local, so forward that exact finale
+        // signal into the configured dungeon objective system.
+        DungeonCompletionSystem.noteRoomBossClear(getClientLevelScope(client), roomId);
+
         LevelHandler.relayToLevel(client, 0xAD, data);
     }
 
@@ -4932,13 +5162,31 @@ export class LevelHandler {
 
     static handleSetUntargetable(client: Client, data: Buffer): void {
         const br = new BitReader(data);
-        br.readMethod4();
-        br.readMethod15();
+        const rawEntityId = br.readMethod4();
+        const untargetable = br.readMethod15();
         if (
             Number.isFinite(Number(client.currentRoomId)) &&
             LevelHandler.shouldSuppressSharedDungeonCutscenePacket(client, Math.max(0, Math.round(Number(client.currentRoomId))))
         ) {
             return;
+        }
+
+        const levelScope = getClientLevelScope(client);
+        let canonicalEntityId = rawEntityId;
+        if (LevelConfig.isDungeonLevel(client.currentLevel)) {
+            const { CombatHandler } = require('./CombatHandler') as typeof import('./CombatHandler');
+            canonicalEntityId = CombatHandler.resolveClientHostileAliasForSharedState(client, levelScope, rawEntityId);
+        }
+
+        const localEntity = client.entities.get(rawEntityId) ?? client.entities.get(canonicalEntityId);
+        if (localEntity && !localEntity.isPlayer) {
+            localEntity.untargetable = untargetable;
+        }
+
+        const levelMap = LevelHandler.getCurrentLevelMap(client);
+        const canonicalEntity = levelMap?.get(canonicalEntityId) ?? levelMap?.get(rawEntityId);
+        if (canonicalEntity && !canonicalEntity.isPlayer) {
+            canonicalEntity.untargetable = untargetable;
         }
 
         LevelHandler.relayToLevel(client, 0xAE, data);
@@ -5111,19 +5359,44 @@ export class LevelHandler {
         LevelHandler.clearTransferState(client, oldLevel, oldClientEntId);
 
         // 3. Calculate New Spawn / save logic like Python
-        const spawn = LevelHandler.resolveDungeonExitSpawn(
+        const savedSpawn = LevelHandler.resolveDungeonExitSpawn(
             client,
             activeCharacter,
             oldLevel,
             targetLevel,
-            syncState
+            syncState,
+            Boolean(teleportOverride?.hasCoord)
         );
+        const spawn = LevelHandler.stabilizeHomeReturnSpawn(oldLevel, targetLevel, savedSpawn);
         const newX = spawn.x;
         const newY = spawn.y;
-        const newHasCoord = spawn.hasCoord;
+        const authoredDungeonEntranceDoorId = !teleportOverride?.hasCoord
+            ? LevelConfig.getDungeonEntranceDoorId(oldLevel, targetLevel)
+            : null;
+        // Player Data clears the client's targetDoor whenever explicit coordinates are present.
+        // Suppress that coordinate flag when an authored reverse door exists so the destination
+        // client can place the player at the exact entrance door selected by 0x2E.
+        const newHasCoord = LevelHandler.shouldSendTransferCoordinates(
+            oldLevel,
+            targetLevel,
+            spawn.hasCoord,
+            Boolean(teleportOverride?.hasCoord)
+        );
+        if (authoredDungeonEntranceDoorId !== null) {
+            console.log(
+                `[Level] Dungeon exit ${oldLevel} -> ${targetLevel} using entrance door ${authoredDungeonEntranceDoorId}`
+            );
+        }
         syncPotionReservationForLevelTransition(activeCharacter, oldLevel, targetLevel);
         client.activePotionDrainAtMs = 0;
-        LevelConfig.updateSavedLevelsOnTransfer(activeCharacter, oldLevel, targetLevel, newX, newY);
+        LevelConfig.updateSavedLevelsOnTransfer(
+            activeCharacter,
+            oldLevel,
+            targetLevel,
+            savedSpawn.x,
+            savedSpawn.y,
+            { x: oldX, y: oldY, hasCoord: hasOldCoord }
+        );
         if (!LevelConfig.isDungeonLevel(targetLevel)) {
             clearStoredDungeonSnapshot(activeCharacter);
         }
@@ -5221,7 +5494,7 @@ export class LevelHandler {
             return;
         }
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInLevelScope(levelScope)) {
             if (getClientLevelScope(other) !== levelScope) {
                 continue;
             }
@@ -5390,6 +5663,7 @@ export class LevelHandler {
             )
         );
         const canonicalTerminal = isEnemyCanonical && (
+            acceptsClientAuthorityTerminal ||
             canonicalDestroyed ||
             (Number.isFinite(canonicalHp) && canonicalHp <= 0)
         );
@@ -5722,9 +5996,7 @@ export class LevelHandler {
         
         // Update Saved Coords if it's us and safe level
         if (isSelf && client.character) {
-            const isDungeon = LevelConfig.get(currentLevel).isDungeon;
-            
-            if (currentLevel === "CraftTown" || !isDungeon) {
+            if (LevelConfig.isSaveAllowedLevel(currentLevel)) {
                 if (!client.character.CurrentLevel) {
                     client.character.CurrentLevel = { name: currentLevel, x: ent.x, y: ent.y };
                 } else {

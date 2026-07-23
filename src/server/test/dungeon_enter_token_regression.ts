@@ -6,6 +6,7 @@ import { CharacterHandler } from '../handlers/CharacterHandler';
 import { LevelHandler } from '../handlers/LevelHandler';
 import { BitBuffer } from '../network/protocol/bitBuffer';
 import { BitReader } from '../network/protocol/bitReader';
+import doorMapData from '../data/door_map.json';
 
 type SentPacket = {
     id: number;
@@ -19,6 +20,10 @@ type FakeClient = {
     characters: any[];
     currentLevel: string;
     levelInstanceId: string;
+    entryLevel: string;
+    entryX: number;
+    entryY: number;
+    entryHasCoord: boolean;
     syncAnchorStartedAt: number;
     syncAnchorToken: number;
     syncAnchorCharacterName: string;
@@ -86,6 +91,10 @@ function createFakeClient(name: string, token: number, userId: number, className
         characters: [character],
         currentLevel: 'JC_Mission3',
         levelInstanceId: String(token),
+        entryLevel: 'DreadCemeteryHill',
+        entryX: 1000,
+        entryY: 1000,
+        entryHasCoord: true,
         syncAnchorStartedAt: token,
         syncAnchorToken: token,
         syncAnchorCharacterName: name,
@@ -164,6 +173,12 @@ function testPartyDungeonTransferKeepsAnchorSpawnCoordinates(): void {
     });
     mage.currentLevel = 'CemeteryHillHard';
     mage.character.CurrentLevel = { name: 'CemeteryHillHard', x: 1800, y: 950 };
+    mage.entities.set(mage.clientEntID, {
+        id: mage.clientEntID,
+        isPlayer: true,
+        x: 1800,
+        y: 950
+    });
 
     GlobalState.sessionsByToken.set(rogue.token, rogue as never);
     GlobalState.partyGroups.set(8101, {
@@ -182,6 +197,172 @@ function testPartyDungeonTransferKeepsAnchorSpawnCoordinates(): void {
     assert.equal(syncState.hasCoord, true, 'joiner transfer should preserve explicit party-anchor spawn coordinates');
     assert.equal(syncState.x, 3500, 'joiner transfer should spawn 100px beside the party anchor');
     assert.equal(syncState.y, 1200, 'joiner transfer should spawn at the party anchor vertical position');
+    assert.equal(syncState.syncEntryLevel, 'CemeteryHillHard', 'joiner should keep their own dungeon entry region');
+    assert.equal(syncState.syncEntryX, 1800, 'joiner should keep their own dungeon entry x coordinate');
+    assert.equal(syncState.syncEntryY, 950, 'joiner should keep their own dungeon entry y coordinate');
+    assert.equal(syncState.syncEntryHasCoord, true, 'joiner should retain an exact personal dungeon exit point');
+}
+
+function testDungeonExitPrefersPersonalEntryOverPartyAnchor(): void {
+    const client = createFakeClient('ExitRunner', 55221, 55221, 'rogue');
+    client.currentLevel = 'AC_Mission1';
+    client.entryLevel = 'CemeteryHillHard';
+    client.entryX = 1800;
+    client.entryY = 950;
+    client.entryHasCoord = true;
+
+    const partyAnchorSpawn = { x: 9400, y: 2100, hasCoord: true };
+    const ordinaryExit = (LevelHandler as any).resolveDungeonExitSpawn(
+        client,
+        client.character,
+        'AC_Mission1',
+        'CemeteryHillHard',
+        partyAnchorSpawn,
+        false
+    );
+    assert.deepEqual(
+        ordinaryExit,
+        { x: 1800, y: 950, hasCoord: true },
+        'ordinary dungeon completion should return to the exact door-entry point instead of a party anchor'
+    );
+
+    const explicitTeleport = (LevelHandler as any).resolveDungeonExitSpawn(
+        client,
+        client.character,
+        'AC_Mission1',
+        'CemeteryHillHard',
+        partyAnchorSpawn,
+        true
+    );
+    assert.deepEqual(
+        explicitTeleport,
+        partyAnchorSpawn,
+        'an explicit server teleport should still be able to override the recorded dungeon entrance'
+    );
+
+    assert.equal(
+        (LevelHandler as any).resolveDoorResponseId(
+            'AC_Mission1',
+            'CemeteryHillHard',
+            2
+        ),
+        0,
+        'synthetic completion door ids must be cleared so the client honors explicit entry coordinates'
+    );
+
+    client.entryLevel = '';
+    client.entryHasCoord = false;
+    assert.equal(
+        (LevelHandler as any).resolveDoorResponseId(
+            'CH_MiniMission5',
+            'CemeteryHill',
+            2
+        ),
+        205,
+        'CH mini dungeon completion must select the authored Cemetery Hill entrance door'
+    );
+    assert.equal(
+        (LevelHandler as any).resolveDoorResponseId(
+            'CH_MiniMission6',
+            'CemeteryHill',
+            2
+        ),
+        206,
+        'each dungeon must resolve its own authored entrance door instead of a generic world spawn'
+    );
+    assert.equal(
+        (LevelHandler as any).resolveDoorResponseId(
+            'CH_MiniMission8',
+            'CemeteryHill',
+            1
+        ),
+        208,
+        'Sir Edgar Hocke completion door 1 must resolve to Cemetery Hill entrance door 208'
+    );
+    assert.equal(
+        (LevelHandler as any).resolveDoorResponseId(
+            'AC_Mission1',
+            'Castle',
+            2
+        ),
+        101,
+        'dungeon-authoritative presentation regions must still resolve their authored entrance door'
+    );
+    assert.equal(
+        (LevelHandler as any).shouldSendTransferCoordinates(
+            'CH_MiniMission6',
+            'CemeteryHill',
+            true,
+            false
+        ),
+        false,
+        'authored dungeon exits must not let Player Data coordinates clear the destination entrance door'
+    );
+    assert.equal(
+        (LevelHandler as any).shouldSendTransferCoordinates(
+            'CH_MiniMission6',
+            'CemeteryHill',
+            true,
+            true
+        ),
+        true,
+        'an explicit server teleport must still override the authored dungeon entrance door'
+    );
+    assert.equal(
+        (LevelHandler as any).resolveDoorResponseId(
+            'CemeteryHillHard',
+            'BridgeTownHard',
+            3
+        ),
+        3,
+        'ordinary world door travel should preserve the authored door id'
+    );
+
+    assert.equal(
+        (LevelHandler as any).resolveDoorResponseId(
+            'Castle',
+            'CraftTown',
+            999
+        ),
+        999,
+        'non-completion dungeon travel such as the Home door must preserve its authored door id'
+    );
+}
+
+function testEveryAuthoredDungeonEntranceDoorRoundTrips(): void {
+    let checkedEntries = 0;
+    for (const rawEntry of doorMapData as Array<[[string, number], string]>) {
+        const [[sourceLevel, sourceDoorId], targetLevel] = rawEntry;
+        if (!LevelConfig.isDungeonLevel(targetLevel)) {
+            continue;
+        }
+
+        const entranceDoorId = LevelConfig.getDungeonEntranceDoorId(targetLevel, sourceLevel);
+        if (entranceDoorId === null) {
+            assert.fail(`${targetLevel} is missing its authored ${sourceLevel} entrance-door mapping`);
+        }
+
+        assert.equal(
+            entranceDoorId,
+            sourceDoorId,
+            `${targetLevel} must resolve back to its authored ${sourceLevel} entrance door`
+        );
+        for (const internalExitDoorId of [0, 1, 2]) {
+            assert.equal(
+                (LevelHandler as any).resolveDoorResponseId(targetLevel, sourceLevel, internalExitDoorId),
+                sourceDoorId,
+                `${targetLevel} exit ${internalExitDoorId} must select ${sourceLevel} door ${sourceDoorId}`
+            );
+        }
+        assert.equal(
+            (LevelHandler as any).shouldSendTransferCoordinates(targetLevel, sourceLevel, true, false),
+            false,
+            `${targetLevel} completion must preserve its authored door through Player Data`
+        );
+        checkedEntries += 1;
+    }
+
+    assert.ok(checkedEntries > 0, 'the regression must exercise authored dungeon entrance mappings');
 }
 
 function testReturningDungeonRootLogsPhysicalPartyAnchor(): void {
@@ -284,6 +465,81 @@ function testClosedPartySessionsDoNotProvideDungeonAnchorCoordinates(): void {
     assert.equal(syncState.y, 500, 'closed party sessions must not supply stale anchor coordinates');
 }
 
+function testCastleHockeHomeReturnPreservesLiveSourcePosition(): void {
+    assert.equal(LevelConfig.isSaveAllowedLevel('Castle'), true, 'Castle should be a saveable Home return region');
+
+    const character = createCharacter('CastleRunner', 'rogue');
+    character.CurrentLevel = { name: 'BridgeTown', x: 3944, y: 838 };
+    character.PreviousLevel = { name: 'NewbieRoad', x: 1421, y: 826 };
+
+    (LevelHandler as any).syncTransferSourcePositionFromLiveEntity(
+        character,
+        'Castle',
+        { x: -920, y: -1880 }
+    );
+    assert.deepEqual(
+        character.CurrentLevel,
+        { name: 'Castle', x: -920, y: -1880 },
+        'live Castle movement should replace stale saved-region coordinates before entering Home'
+    );
+
+    LevelConfig.updateSavedLevelsOnTransfer(
+        character,
+        'Castle',
+        'CraftTown',
+        360,
+        1460,
+        { x: -900, y: -1885, hasCoord: true }
+    );
+    assert.deepEqual(
+        character.PreviousLevel,
+        { name: 'Castle', x: -900, y: -1885 },
+        'entering Home should preserve the exact live Castle source record'
+    );
+    assert.equal(
+        (LevelHandler as any).resolveCraftTownReturnLevel(
+            { entryLevel: 'BridgeTown', character },
+            character,
+            'Castle',
+            null
+        ),
+        'Castle',
+        'the active Castle source should win over stale entry-level state'
+    );
+}
+
+function testHomeReturnSpawnGetsGroundingMarginWithoutChangingHorizontalPosition(): void {
+    for (const targetLevel of ['ShazariDesert', 'ShazariDesertHard', 'Castle', 'CastleHard']) {
+        const savedSpawn = { x: 3210, y: -1885, hasCoord: true };
+        const transferSpawn = (LevelHandler as any).stabilizeHomeReturnSpawn(
+            'CraftTown',
+            targetLevel,
+            savedSpawn
+        );
+
+        assert.deepEqual(
+            transferSpawn,
+            { x: 3210, y: -1949, hasCoord: true },
+            `${targetLevel} Home return should start above the saved point so client collision can ground it safely`
+        );
+        assert.deepEqual(
+            savedSpawn,
+            { x: 3210, y: -1885, hasCoord: true },
+            `${targetLevel} grounding margin must not mutate the canonical saved location`
+        );
+    }
+
+    assert.deepEqual(
+        (LevelHandler as any).stabilizeHomeReturnSpawn(
+            'BridgeTown',
+            'ShazariDesert',
+            { x: 618, y: 647, hasCoord: true }
+        ),
+        { x: 618, y: 647, hasCoord: true },
+        'ordinary door travel should not receive the Home-return grounding margin'
+    );
+}
+
 function main(): void {
     const pendingWorld = new Map(GlobalState.pendingWorld);
     const pendingExtended = new Map(GlobalState.pendingExtended);
@@ -314,6 +570,8 @@ function main(): void {
         GlobalState.tokenChar.clear();
         GlobalState.usedTransferTokens.clear();
         testPartyDungeonTransferKeepsAnchorSpawnCoordinates();
+        testDungeonExitPrefersPersonalEntryOverPartyAnchor();
+        testEveryAuthoredDungeonEntranceDoorRoundTrips();
         GlobalState.pendingWorld.clear();
         GlobalState.pendingExtended.clear();
         GlobalState.sessionsByToken.clear();
@@ -332,6 +590,8 @@ function main(): void {
         GlobalState.tokenChar.clear();
         GlobalState.usedTransferTokens.clear();
         testClosedPartySessionsDoNotProvideDungeonAnchorCoordinates();
+        testCastleHockeHomeReturnPreservesLiveSourcePosition();
+        testHomeReturnSpawnGetsGroundingMarginWithoutChangingHorizontalPosition();
         console.log('dungeon_enter_token_regression: ok');
     } finally {
         GlobalState.pendingWorld = pendingWorld;

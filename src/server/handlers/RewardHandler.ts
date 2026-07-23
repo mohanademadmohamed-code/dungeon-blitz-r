@@ -18,6 +18,8 @@ import { Config } from '../core/config';
 import { EntityHandler } from './EntityHandler';
 import { TutorialDungeonMechanics } from '../core/TutorialDungeonMechanics';
 import { DungeonCompletionSystem } from '../core/DungeonCompletionSystem';
+import { AdminRuntimeSettings } from '../core/AdminRuntimeSettings';
+import { CharacterSync } from '../utils/CharacterSync';
 
 interface RewardRequest {
     receiverId: number;
@@ -161,9 +163,9 @@ export class RewardHandler {
             { tier: 2, weight: (1 / 100) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.MiniBoss }
         ],
         Boss: [
-            { tier: 0, weight: 1 - ((1 / 5) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.Boss) - ((1 / 25) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.Boss) },
-            { tier: 1, weight: (1 / 5) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.Boss },
-            { tier: 2, weight: (1 / 25) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.Boss }
+            { tier: 0, weight: 1 - ((1 / 8) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.Boss) - ((1 / 60) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.Boss) },
+            { tier: 1, weight: (1 / 8) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.Boss },
+            { tier: 2, weight: (1 / 60) / RewardHandler.GEAR_DROP_CHANCE_BY_RANK.Boss }
         ]
     };
     private static readonly DUNGEON_REALM_MAP: Record<string, string> = {
@@ -329,32 +331,72 @@ export class RewardHandler {
         return { value: weights[weights.length - 1]!.value, roll };
     }
 
-    private static getGearRarityWeights(client: Client, entRank: string): Array<{ tier: 0 | 1 | 2; weight: number }> {
+    private static getGearRarityWeights(client: Client, entRank: string, itemMultiplier: number = 1): Array<{ tier: 0 | 1 | 2; weight: number }> {
         const rankWeights = RewardHandler.isHardDungeon(client.currentLevel)
             ? RewardHandler.GEAR_RARITY_WEIGHTS_HARD_BY_RANK[entRank]
             : RewardHandler.GEAR_RARITY_WEIGHTS_NORMAL_BY_RANK[entRank];
 
-        return rankWeights ?? (
+        const baseWeights = rankWeights ?? (
             RewardHandler.isHardDungeon(client.currentLevel)
                 ? RewardHandler.GEAR_RARITY_WEIGHTS_HARD
                 : RewardHandler.GEAR_RARITY_WEIGHTS_NORMAL
         );
+
+        if (entRank !== 'Boss') {
+            return baseWeights;
+        }
+
+        return RewardHandler.applyBossGearFindOverflow(baseWeights, itemMultiplier);
     }
 
-    private static resolveGearTier(client: Client, entRank: string): number {
-        const weights = RewardHandler.getGearRarityWeights(client, entRank);
+    private static applyBossGearFindOverflow(
+        weights: Array<{ tier: 0 | 1 | 2; weight: number }>,
+        itemMultiplier: number
+    ): Array<{ tier: 0 | 1 | 2; weight: number }> {
+        const multiplier = RewardHandler.sanitizeDropMultiplier(itemMultiplier);
+        if (multiplier <= 1) {
+            return weights;
+        }
+
+        const commonWeight = weights.find((entry) => entry.tier === 0)?.weight ?? 0;
+        const rareWeight = weights.find((entry) => entry.tier === 1)?.weight ?? 0;
+        const legendaryWeight = weights.find((entry) => entry.tier === 2)?.weight ?? 0;
+        if (commonWeight <= 0 || (rareWeight <= 0 && legendaryWeight <= 0)) {
+            return weights;
+        }
+
+        const boostedRare = Math.max(0, rareWeight * multiplier);
+        const boostedLegendary = Math.max(0, legendaryWeight * multiplier);
+        const boostedValuable = boostedRare + boostedLegendary;
+        if (boostedValuable >= 1) {
+            return [
+                { tier: 0, weight: 0 },
+                { tier: 1, weight: boostedValuable > 0 ? boostedRare / boostedValuable : 0 },
+                { tier: 2, weight: boostedValuable > 0 ? boostedLegendary / boostedValuable : 0 }
+            ];
+        }
+
+        return [
+            { tier: 0, weight: 1 - boostedValuable },
+            { tier: 1, weight: boostedRare },
+            { tier: 2, weight: boostedLegendary }
+        ];
+    }
+
+    private static resolveGearTier(client: Client, entRank: string, itemMultiplier: number = 1): number {
+        const weights = RewardHandler.getGearRarityWeights(client, entRank, itemMultiplier);
         return RewardHandler.pickWeighted<number>(weights.map((entry) => ({
             value: entry.tier,
             weight: entry.weight
         })));
     }
 
-    private static resolveGearTierDebug(client: Client, entRank: string): {
+    private static resolveGearTierDebug(client: Client, entRank: string, itemMultiplier: number = 1): {
         tier: number;
         tierRoll: number | null;
         tierWeights: Array<{ tier: number; weight: number }>;
     } {
-        const tierWeights = RewardHandler.getGearRarityWeights(client, entRank);
+        const tierWeights = RewardHandler.getGearRarityWeights(client, entRank, itemMultiplier);
         const weights = tierWeights.map((entry) => ({
             value: entry.tier,
             weight: entry.weight
@@ -367,8 +409,8 @@ export class RewardHandler {
         };
     }
 
-    private static getGearTierWeights(client: Client, entRank: string): Array<{ tier: number; weight: number }> {
-        return RewardHandler.getGearRarityWeights(client, entRank);
+    private static getGearTierWeights(client: Client, entRank: string, itemMultiplier: number = 1): Array<{ tier: number; weight: number }> {
+        return RewardHandler.getGearRarityWeights(client, entRank, itemMultiplier);
     }
 
     private static sanitizeDropMultiplier(value: number | undefined): number {
@@ -379,17 +421,25 @@ export class RewardHandler {
         const rank = String(entType?.EntRank ?? 'Minion');
         const baseChance = RewardHandler.MATERIAL_DROP_CHANCE_BY_RANK[rank] ?? RewardHandler.MATERIAL_DROP_CHANCE_BY_RANK.Minion;
         const multiplier = RewardHandler.sanitizeDropMultiplier(reward.gearMultiplier);
-        return Math.max(0, Math.min(1, baseChance * multiplier));
+        return AdminRuntimeSettings.scaleMaterialChance(baseChance * multiplier);
     }
 
-    private static resolveGearDropChance(entType: any, reward: RewardRequest): number {
+    private static resolveGearDropChance(entType: any, itemMultiplier: number): number {
         const rawChance = Number(entType?.ItemDropChance ?? 0);
         if (rawChance <= 0) {
             return 0;
         }
 
-        const multiplier = RewardHandler.sanitizeDropMultiplier(reward.itemMultiplier);
-        return Math.max(0, Math.min(1, rawChance * multiplier));
+        const multiplier = RewardHandler.sanitizeDropMultiplier(itemMultiplier);
+        return AdminRuntimeSettings.scaleGearChance(rawChance * multiplier);
+    }
+
+    private static resolveGearFindMultiplier(client: Client): number {
+        const petBonuses = PetHandler.getEquippedPetBonusRates(client.character);
+        const charmBonuses = getEquippedCharmBonuses(client.character);
+        const potionBonuses = getActivePotionBonuses(client.character, client.currentLevel);
+        const gearFindRate = Math.max(0, petBonuses.itemFind + charmBonuses.itemFind + potionBonuses.itemFind);
+        return RewardHandler.sanitizeDropMultiplier(1 + gearFindRate);
     }
 
     private static resolveMaterialDropRarity(client: Client): 'M' | 'R' | 'L' {
@@ -652,6 +702,55 @@ export class RewardHandler {
             .join(' ');
     }
 
+    /**
+     * Only crafting materials are magnet-eligible. Gold deliberately keeps its ground drop so the
+     * player still sees the pickup, and gear, health and dye were never in scope.
+     */
+    private static isLootMagnetReward(reward: LootReward): boolean {
+        if (Number(reward.material ?? 0) <= 0) {
+            return false;
+        }
+
+        return !(
+            Number(reward.gold ?? 0) > 0 ||
+            Number(reward.gear ?? 0) > 0 ||
+            Number(reward.health ?? 0) > 0 ||
+            Number(reward.dye ?? 0) > 0
+        );
+    }
+
+    private static grantMagnetCollectedLoot(client: Client, reward: LootReward): boolean {
+        return RewardHandler.grantMaterialLoot(client, Number(reward.material ?? 0));
+    }
+
+    private static grantGoldLoot(client: Client, amount: number): boolean {
+        if (!client.character || amount <= 0) {
+            return false;
+        }
+
+        client.character.gold = Number(client.character.gold ?? 0) + amount;
+        noteDungeonRunTreasure(client, amount);
+        RewardHandler.sendGoldReward(client, amount, false);
+        return true;
+    }
+
+    private static grantMaterialLoot(client: Client, materialId: number): boolean {
+        if (!client.character || materialId <= 0) {
+            return false;
+        }
+
+        const materials = normalizeCharacterMaterials(client.character);
+        const existing = materials.find((entry: any) => Number(entry.materialID ?? 0) === materialId);
+        if (existing) {
+            existing.count = Number(existing.count ?? 0) + 1;
+        } else {
+            materials.push({ materialID: materialId, count: 1 });
+        }
+        client.character.materials = materials;
+        RewardHandler.sendMaterialReward(client, materialId, 1);
+        return true;
+    }
+
     private static spawnLoot(
         client: Client,
         x: number,
@@ -705,6 +804,24 @@ export class RewardHandler {
             }
             return;
         }
+        // The pet picks these up for the player, so skip the ground drop and the 0x38 round trip.
+        // Nothing is registered in pendingLoot, so the client can never claim this drop a second time.
+        if (RewardHandler.isLootMagnetReward(reward) && PetHandler.hasActiveLootMagnetPet(client.character)) {
+            const collected = RewardHandler.grantMagnetCollectedLoot(client, reward);
+            if (collected) {
+                RewardHandler.persistCharacter(client, 'pet loot magnet');
+            }
+            console.log(`[RewardHandler][PetLootMagnet] ${RewardHandler.formatLootSyncFields({
+                character: client.character?.name ?? '',
+                type,
+                amount: metadata.amount,
+                granted: collected,
+                gold: client.character?.gold ?? 0,
+                reason
+            })}`);
+            return;
+        }
+
         const pendingReward: LootReward = { ...reward, __lootDropMetadata: metadata };
         client.pendingLoot.set(lootId, pendingReward);
         const sourceEntity = RewardHandler.getCanonicalLootSource(metadata);
@@ -732,19 +849,36 @@ export class RewardHandler {
         };
     }
 
-    private static applyXpReward(client: Client, amount: number): boolean {
+    static grantExperience(client: Client, amount: number): number {
         if (!client.character || amount <= 0) {
-            return false;
+            return 0;
         }
 
         const xpDebug = RewardHandler.resolveXpRewardDebug(client, amount);
         const totalAmount = xpDebug.finalExp;
+        if (totalAmount <= 0) {
+            return 0;
+        }
 
+        const previousLevel = Math.max(1, Number(client.character.level ?? 1));
         client.character.xp = Number(client.character.xp ?? 0) + totalAmount;
         client.character.level = GameData.getPlayerLevelFromXp(Number(client.character.xp ?? 0));
         RewardHandler.sendXpReward(client, totalAmount);
         PetHandler.applyActivePetExperience(client, totalAmount);
-        return true;
+
+        if (Number(client.character.level) !== previousLevel) {
+            EntityHandler.refreshPlayerSnapshot(client);
+            client.combatStatsDirty = true;
+            client.allowDirtyCombatStatsRegen = true;
+            client.lastCombatStatsRefreshRequestAt = Date.now();
+            CharacterSync.requestCombatStatsRefresh(client);
+        }
+
+        return totalAmount;
+    }
+
+    private static applyXpReward(client: Client, amount: number): boolean {
+        return RewardHandler.grantExperience(client, amount) > 0;
     }
 
     private static collectOwnedGearTierKeys(client: Client): Set<string> {
@@ -793,8 +927,8 @@ export class RewardHandler {
         gearTier: number;
         dyeId: number;
     } {
-        let exp = reward.exp;
-        let gold = reward.gold;
+        let exp = AdminRuntimeSettings.scaleXp(reward.exp);
+        let gold = AdminRuntimeSettings.scaleGold(reward.gold);
         const packetGold = gold;
         let hpGain = reward.hpGain;
         let materialId = 0;
@@ -831,12 +965,13 @@ export class RewardHandler {
             itemLootAllowedByClass;
         const goldFindRate = petBonuses.goldFind + charmBonuses.goldFind + gearGoldFind + potionBonuses.goldFind;
         const shouldRollMaterial = shouldApplyDropTables && Boolean(realm);
-        const shouldRollGear = shouldApplyDropTables;
+        const shouldRollGear = shouldApplyDropTables && isLargeEnemy;
         const materialChance = shouldRollMaterial
             ? RewardHandler.resolveMaterialDropChance(entType, reward)
             : 0;
+        const gearFindMultiplier = RewardHandler.resolveGearFindMultiplier(client);
         const gearChance = shouldRollGear
-            ? RewardHandler.resolveGearDropChance(entType, reward)
+            ? RewardHandler.resolveGearDropChance(entType, gearFindMultiplier)
             : 0;
         const dyeDebug = shouldApplyDropTables
             ? RewardHandler.resolveDyeDropRarityDebug(client, entType)
@@ -859,9 +994,8 @@ export class RewardHandler {
         if (allowItemDrop && dyeDebug.rarity) {
             dyeId = GameData.getRandomDyeId([dyeDebug.rarity], RewardHandler.collectOwnedDyeIds(client));
         }
-        if (allowItemDrop && gearChance > 0 && Math.random() < gearChance) {
-            const tierResult = RewardHandler.resolveGearTierDebug(client, entRank);
-            gearTier = tierResult.tier;
+        if (shouldRollGear && gearChance > 0 && Math.random() < gearChance) {
+            gearTier = RewardHandler.resolveGearTier(client, entRank, gearFindMultiplier);
             gearId = GameData.getGearIdForEntity(
                 entName,
                 playerClass,
@@ -915,8 +1049,8 @@ export class RewardHandler {
     }
 
     private static findOnlineContributor(levelName: string, contributorKey: string): Client | null {
-        for (const other of GlobalState.sessionsByToken.values()) {
-            if (!other.playerSpawned || !other.character || getClientLevelScope(other) !== levelName) {
+        for (const other of GlobalState.getSessionsInLevelScope(levelName)) {
+            if (!other.playerSpawned || !other.character) {
                 continue;
             }
             if (getClientCharacterKey(other) === contributorKey) {
@@ -939,7 +1073,7 @@ export class RewardHandler {
             return;
         }
 
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInParty(contributorPartyId)) {
             if (
                 !other.playerSpawned ||
                 !other.character ||
@@ -977,6 +1111,36 @@ export class RewardHandler {
         };
     }
 
+    private static getBossPrimaryRewardKey(client: Client, sourceEntity: any, sourceId: number): string {
+        if (
+            !RewardHandler.isDungeonLevel(client.currentLevel) ||
+            !sourceEntity ||
+            sourceEntity.isPlayer
+        ) {
+            return '';
+        }
+
+        const isBoss = GameData.isDungeonBossEntity(client.currentLevel, sourceEntity) ||
+            GameData.getEntityRank(sourceEntity) === 'Boss';
+        if (!isBoss) {
+            return '';
+        }
+
+        const canonicalId = Math.max(
+            0,
+            Math.round(Number(
+                sourceEntity.canonicalEntityId ??
+                sourceEntity.sharedCanonicalId ??
+                sourceEntity.id ??
+                sourceId ??
+                0
+            ))
+        );
+        return canonicalId > 0
+            ? `${getClientLevelScope(client)}:boss-primary:${canonicalId}`
+            : '';
+    }
+
     private static applyRewardToRecipient(
         client: Client,
         reward: RewardRequest,
@@ -996,13 +1160,30 @@ export class RewardHandler {
             return false;
         }
 
+        const bossPrimaryRewardKey = RewardHandler.getBossPrimaryRewardKey(client, sourceEntity, reward.sourceId);
+        const bossPrimaryRewardAlreadyGranted = Boolean(
+            bossPrimaryRewardKey && client.processedRewardSources.has(bossPrimaryRewardKey)
+        );
         const resolved = RewardHandler.maybeOverrideDungeonReward(client, sourceEntity, reward);
+        if (bossPrimaryRewardAlreadyGranted) {
+            // Scripted phase revives may still produce the authored health drop,
+            // but XP, currency and hunting loot belong to the boss's first life.
+            resolved.exp = 0;
+            resolved.gold = 0;
+            resolved.materialId = 0;
+            resolved.gearId = 0;
+            resolved.gearTier = 0;
+            resolved.dyeId = 0;
+        }
         const hasReward = resolved.exp > 0 || resolved.gold > 0 || resolved.hpGain > 0 ||
             resolved.gearId > 0 || resolved.materialId > 0 || resolved.dyeId > 0;
         if (!hasReward) {
             return false;
         }
         client.processedRewardSources.add(rewardKey);
+        if (bossPrimaryRewardKey) {
+            client.processedRewardSources.add(bossPrimaryRewardKey);
+        }
         const reason = context.reason ?? 'unknown';
         const caller = context.caller ?? 'unknown';
         if (context.sourceLootDropNonce) {
@@ -1012,6 +1193,8 @@ export class RewardHandler {
         noteDungeonRunChestOpened(client, reward.sourceId, sourceEntity);
 
         if (resolved.gold > 0) {
+            // Gold always lands where the kill happened. Fetching it back is the pet's job,
+            // not the drop position's — see PetHandler.hasActiveLootMagnetPet.
             RewardHandler.spawnLoot(client, dropPosition.x, dropPosition.y, { gold: resolved.gold }, 0, 0, context);
         }
         if (resolved.hpGain > 0) {
@@ -1091,10 +1274,9 @@ export class RewardHandler {
             EntityHandler.broadcastTutorialDungeonObjectTransition(client, authority);
         }
 
-        const recipients = Array.from(GlobalState.sessionsByToken.values()).filter((recipient) =>
+        const recipients = Array.from(GlobalState.getSessionsInLevelScope(levelScope)).filter((recipient) =>
             recipient.playerSpawned &&
-            Boolean(recipient.character) &&
-            getClientLevelScope(recipient) === levelScope
+            Boolean(recipient.character)
         );
         for (const recipient of recipients) {
             const participantKey = DungeonCompletionSystem.getParticipantKey(recipient);
@@ -1188,7 +1370,7 @@ export class RewardHandler {
         }
 
         const recipients: Client[] = [];
-        for (const other of GlobalState.sessionsByToken.values()) {
+        for (const other of GlobalState.getSessionsInParty(partyId)) {
             if (
                 !other.playerSpawned ||
                 !other.character ||
@@ -1335,23 +1517,11 @@ export class RewardHandler {
 
         let shouldSave = false;
 
-        if (reward.gold && reward.gold > 0) {
-            client.character.gold = Number(client.character.gold ?? 0) + reward.gold;
-            noteDungeonRunTreasure(client, reward.gold);
-            RewardHandler.sendGoldReward(client, reward.gold, false);
+        if (RewardHandler.grantGoldLoot(client, Number(reward.gold ?? 0))) {
             shouldSave = true;
         }
 
-        if (reward.material && reward.material > 0) {
-            const materials = normalizeCharacterMaterials(client.character);
-            const existing = materials.find((entry: any) => Number(entry.materialID ?? 0) === reward.material);
-            if (existing) {
-                existing.count = Number(existing.count ?? 0) + 1;
-            } else {
-                materials.push({ materialID: reward.material, count: 1 });
-            }
-            client.character.materials = materials;
-            RewardHandler.sendMaterialReward(client, reward.material, 1);
+        if (RewardHandler.grantMaterialLoot(client, Number(reward.material ?? 0))) {
             shouldSave = true;
         }
 
