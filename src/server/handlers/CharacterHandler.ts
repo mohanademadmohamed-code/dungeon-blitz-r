@@ -198,9 +198,9 @@ export class CharacterHandler {
     private static shouldSendExtendedPlayerData(
         firstLogin: boolean,
         pendingExtended: boolean,
-        entry: PendingTransfer
+        _entry: PendingTransfer
     ): boolean {
-        return firstLogin || pendingExtended || entry.targetLevel === 'CraftTown';
+        return firstLogin || pendingExtended;
     }
 
     private static repairUnsafeSavedDungeonLocation(character: Character): boolean {
@@ -1153,6 +1153,14 @@ export class CharacterHandler {
         client.token = token;
         client.clientEntID = 0;
         client.currentLevel = entry.targetLevel;
+        console.log("========== PLAYER ENTERED LEVEL ==========");
+        console.log("Target level:", entry.targetLevel);
+        console.log("Client currentLevel:", client.currentLevel);
+        console.log("Character:", client.character?.name);
+        console.log("Is dungeon:", LevelConfig.isDungeonLevel(client.currentLevel));
+        console.log("==========================================");
+
+
         client.levelInstanceId = entry.targetLevel === 'CraftTown'
             ? normalizeLevelInstanceId(entry.levelInstanceId) || getCraftTownHomeInstanceId(entry.character, entry.craftTownHostCharacter)
             : LevelConfig.isDungeonLevel(entry.targetLevel)
@@ -1310,6 +1318,7 @@ export class CharacterHandler {
         console.log(`[GameLogin] Sent 0x10 (Player Data)`);
 
         MissionHandler.syncMissionStateToClient(client);
+        MissionHandler.syncFullClearDungeonEntryMissionToClient(client);
         CharacterHandler.sendBootstrappedStoryMission(client, storyRepair.addedMissionId);
 
         SocialHandler.handleSessionReady(client);
